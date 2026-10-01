@@ -1,18 +1,48 @@
 // Student number: 25143230
-import express from "express";
-const app = express();
-app.use(express.json());
+app.post("/api/signup", async(req, res) => {
+  try{
+    const{ email, password, username } = req.body;
+    if(!email || !password || !username){
+      return res.status(400).json({ error: "All fields are required" });
+    }
 
-app.get("/", (req, res) => {
-    res.json({ success: true, userId: 1 });
+    const db = getDB();
+    const users = db.collection("users");
+
+    // Check if user already exists
+    const existing = await users.findOne({ email });
+    if(existing){
+      return res.status(400).json({ error: "Email already registered" });
+    }
+
+    const newUser = { email, password, username, friends: [] };
+    const result = await users.insertOne(newUser);
+
+    res.json({ _id: result.insertedId, email, username });
+  } 
+  catch(err){
+    res.status(500).json({ error: "Signup failed" });
+  }
 });
 
-app.post("/signup", (req, res) => {
-    res.json({ success: true, userId: 1 });
-});
+app.post("/api/login", async(req, res) =>{
+  try{
+    const{ email, password } = req.body;
+    if(!email || !password){
+      return res.status(400).json({ error: "Email and password required" });
+    }
 
-app.post("/login", (req, res) => {
-    res.json({ success: true, token: "abc123" });
-});
+    const db = getDB();
+    const users = db.collection("users");
 
-app.listen(3000, () => console.log("Backend running on port 3000"));
+    const user = await users.findOne({ email, password });
+    if(!user){
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    res.json({ success: true, userId: user._id, token: "dummy-token" });
+  } 
+  catch(err){
+    res.status(500).json({ error: "Login failed" });
+  }
+});
