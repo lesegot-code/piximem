@@ -1,4 +1,12 @@
 // Student number: 25143230
+import express from "express";
+const app = express();
+app.use(express.json());
+
+app.get("/", (req, res) => {
+    res.json({ success: "Test succeeded" });
+});
+
 app.post("/api/signup", async(req, res) => {
   try{
     const{ email, password, username } = req.body;
@@ -46,3 +54,5 @@ app.post("/api/login", async(req, res) =>{
     res.status(500).json({ error: "Login failed" });
   }
 });
+
+app.listen(3000, () => console.log("Backend running on port 3000"));
