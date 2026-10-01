@@ -6,7 +6,11 @@ import{ connectToMongoDB, getDB } from "./db.js";
 const app = express();
 app.use(express.json());
 
-app.get("/api/users", async(req, res) =>{
+function isValidObjectId(id){
+  return ObjectId.isValid(id);
+}
+
+app.get("/api/users", async (req, res) => {
   try{
     const db = getDB();
     const users = db.collection("users");
@@ -16,13 +20,14 @@ app.get("/api/users", async(req, res) =>{
     res.json(allUsers);
   } 
   catch(err){
-    res.status(500).json({ error: "Failed to fetch user profile" });
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch users" });
   }
 });
 
-app.post("/api/signup", async(req, res) =>{
+app.post("/api/signup", async (req, res) => {
   try{
-    const{ email, password, username } = req.body;
+    const { email, password, username } = req.body;
     if(!email || !password || !username){
       return res.status(400).json({ error: "All fields are required" });
     }
@@ -36,19 +41,20 @@ app.post("/api/signup", async(req, res) =>{
       return res.status(400).json({ error: "Email already registered" });
     }
 
-    const newUser ={ email, password, username, friends: [] };
+    const newUser = { email, password, username, friends: [] };
     const result = await users.insertOne(newUser);
 
     res.json({ _id: result.insertedId, email, username });
   } 
   catch(err){
+    console.error(err);
     res.status(500).json({ error: "Signup failed" });
   }
 });
 
-app.post("/api/login", async(req, res) =>{
+app.post("/api/login", async (req, res) => {
   try{
-    const{ email, password } = req.body;
+    const { email, password } = req.body;
     if(!email || !password){
       return res.status(400).json({ error: "Email and password required" });
     }
@@ -64,16 +70,23 @@ app.post("/api/login", async(req, res) =>{
     res.json({ success: true, userId: user._id, token: "dummy-token" });
   } 
   catch(err){
+    console.error(err);
     res.status(500).json({ error: "Login failed" });
   }
 });
 
-app.get("/api/users/:id", async(req, res) =>{
+app.get("/api/users/:id", async (req, res) => {
   try{
+    const { id } = req.params;
+
+    if(!isValidObjectId(id)){
+      return res.status(400).json({ error: "ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    }
+
     const db = getDB();
     const users = db.collection("users");
 
-    const user = await users.findOne({ _id: new ObjectId(req.params.id) });
+    const user = await users.findOne({ _id: new ObjectId(id) });
     if(!user){
       return res.status(404).json({ error: "User not found" });
     }
@@ -81,19 +94,26 @@ app.get("/api/users/:id", async(req, res) =>{
     res.json(user);
   } 
   catch(err){
+    console.error(err);
     res.status(500).json({ error: "Failed to fetch user profile" });
   }
 });
 
-app.put("/api/users/:id", async(req, res) =>{
+app.put("/api/users/:id", async (req, res) => {
   try{
-    const{ username, bio } = req.body;
+    const { id } = req.params;
+
+    if(!isValidObjectId(id)){
+      return res.status(400).json({ error: "ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    }
+
+    const { username, bio } = req.body;
     const db = getDB();
     const users = db.collection("users");
 
     const result = await users.updateOne(
-      { _id: new ObjectId(req.params.id) },
-      { $set:{ username, bio } }
+     { _id: new ObjectId(id) },
+     { $set:{ username, bio } }
     );
 
     if(result.matchedCount === 0){
@@ -103,16 +123,23 @@ app.put("/api/users/:id", async(req, res) =>{
     res.json({ success: true, message: "Profile updated" });
   } 
   catch(err){
+    console.error(err);
     res.status(500).json({ error: "Failed to update profile" });
   }
 });
 
-app.delete("/api/users/:id", async(req, res) =>{
+app.delete("/api/users/:id", async (req, res) => {
   try{
+    const { id } = req.params;
+
+    if(!isValidObjectId(id)){
+      return res.status(400).json({ error: "ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    }
+
     const db = getDB();
     const users = db.collection("users");
 
-    const result = await users.deleteOne({ _id: new ObjectId(req.params.id) });
+    const result = await users.deleteOne({ _id: new ObjectId(id) });
     if(result.deletedCount === 0){
       return res.status(404).json({ error: "User not found" });
     }
@@ -120,16 +147,226 @@ app.delete("/api/users/:id", async(req, res) =>{
     res.json({ success: true, message: "User deleted" });
   } 
   catch(err){
+    console.error(err);
     res.status(500).json({ error: "Failed to delete user" });
+  }
+});
+
+//=======================       POSTS      ======================================
+//=======================       POSTS      ======================================
+//=======================       POSTS      ======================================
+
+app.get("/api/posts", async (req, res) => {
+  try{
+    const db = getDB();
+    const posts = await db.collection("posts").find({}).toArray();
+    res.json(posts);
+  } 
+  catch(err){
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch posts" });
+  }
+});
+
+app.post("/api/posts", async (req, res) => {
+  try{
+    const { userId, caption, hashtags } = req.body;
+    if(!userId || !caption){
+      return res.status(400).json({ error: "User and caption required" });
+    }
+
+    if(!isValidObjectId(userId)){
+      return res.status(400).json({ error: "User ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    }
+
+    const db = getDB();
+    const users = db.collection("users");
+
+    const user = await users.findOne({ _id: new ObjectId(userId) });
+    if(!user){
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const newPost = {
+      userId: new ObjectId(userId),
+      caption,
+      hashtags: hashtags || [],
+      comments: [],
+      reports: [],
+      createdAt: new Date()
+    };
+
+    const result = await db.collection("posts").insertOne(newPost);
+    res.json({ _id: result.insertedId, ...newPost });
+  } 
+  catch(err){
+    console.error(err);
+    res.status(500).json({ error: "Failed to create post" });
+  }
+});
+
+app.put("/api/posts/:id", async (req, res) => {
+  try{
+    const { id } = req.params;
+
+    if(!isValidObjectId(id)){
+      return res.status(400).json({ error: "ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    }
+
+    const { caption, hashtags } = req.body;
+    const db = getDB();
+
+    const result = await db.collection("posts").updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { caption, hashtags } }
+    );
+
+    if(result.matchedCount === 0){
+      return res.status(404).json({ error: "Post not found" });
+    }
+
+    res.json({ success: true, message: "Post updated" });
+  } 
+  catch(err){
+    console.error(err);
+    res.status(500).json({ error: "Failed to update post" });
+  }
+});
+
+app.delete("/api/posts/:id", async (req, res) => {
+  try{
+    const { id } = req.params;
+
+    if(!isValidObjectId(id)){
+      return res.status(400).json({ error: "ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    }
+
+    const db = getDB();
+    const result = await db.collection("posts").deleteOne({ _id: new ObjectId(id) });
+
+    if(result.deletedCount === 0){
+      return res.status(404).json({ error: "Post not found" });
+    }
+
+    res.json({ success: true, message: "Post deleted" });
+  } 
+  catch(err){
+    console.error(err);
+    res.status(500).json({ error: "Failed to delete post" });
+  }
+});
+
+app.post("/api/posts/:id/comments", async (req, res) => {
+  try{
+    const { id } = req.params;
+
+    if(!isValidObjectId(id)){
+      return res.status(400).json({ error: "Post ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    }
+
+    const { userId, text } = req.body;
+    if(!userId || !text){
+      return res.status(400).json({ error: "User and text required" });
+    }
+
+    if(!isValidObjectId(userId)){
+      return res.status(400).json({ error: "User ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    }
+
+    const db = getDB();
+
+    const post = await db.collection("posts").findOne({ _id: new ObjectId(id) });
+    if(!post){
+      return res.status(404).json({ error: "Post not found" });
+    }
+
+    const user = await db.collection("users").findOne({ _id: new ObjectId(userId) });
+    if(!user){
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const comment = {
+      userId: new ObjectId(userId),
+      text,
+      createdAt: new Date()
+    };
+
+    const result = await db.collection("posts").updateOne(
+      { _id: new ObjectId(id) },
+      { $push:{ comments: comment } }
+    );
+
+    if(result.matchedCount === 0){
+      return res.status(404).json({ error: "Post not found" });
+    }
+
+    res.json({ success: true, comment });
+  } 
+  catch(err){
+    console.error(err);
+    res.status(500).json({ error: "Failed to add comment" });
+  }
+});
+
+app.post("/api/posts/:id/report", async (req, res) => {
+  try{
+    const { id } = req.params;
+
+    if(!isValidObjectId(id)){
+      return res.status(400).json({ error: "Post ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    }
+
+    const { userId, reason } = req.body;
+    if(!userId || !reason){
+      return res.status(400).json({ error: "User and reason required" });
+    }
+    
+    if(!isValidObjectId(userId)){
+      return res.status(400).json({ error: "User ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    }
+
+    const db = getDB();
+
+    const post = await db.collection("posts").findOne({ _id: new ObjectId(id) });
+    if(!post){
+      return res.status(404).json({ error: "Post not found" });
+    }
+
+    const user = await db.collection("users").findOne({ _id: new ObjectId(userId) });
+    if(!user){
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const report = {
+      userId: new ObjectId(userId),
+      reason,
+      createdAt: new Date()
+    };
+
+    const result = await db.collection("posts").updateOne(
+      { _id: new ObjectId(id) },
+      { $push:{ reports: report } }
+    );
+
+    if(result.matchedCount === 0){
+      return res.status(404).json({ error: "Post not found" });
+    }
+
+    res.json({ success: true, report });
+  } 
+  catch(err){
+    console.error(err);
+    res.status(500).json({ error: "Failed to report post" });
   }
 });
 
 async function startServer(){
     await connectToMongoDB();
 
-    app.listen(3000,() =>{
-        console.log("Backend running on port 3000");
+    app.listen(3000,() => {
+      console.log("Backend running on port 3000");
     });
 }
+
 
 startServer();
