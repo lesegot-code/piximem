@@ -15,5 +15,5 @@ docker run -p 5173:5173 --rm photoshare-frontend
 ## Backend
 ```
 docker build -t photoshare-backend ./backend
-docker run -p 3000:3000 --rm photoshare-backend
+docker run --env-file ./backend/.env -p 3000:3000 --rm photoshare-backend
 ```
