@@ -1,4 +1,4 @@
-/* :root {
+:root {
   --text: #6b6375;
   --text-h: #08060d;
   --bg: #fff;
@@ -108,10 +108,10 @@ code {
   line-height: 135%;
   padding: 4px 8px;
   background: var(--code-bg);
-} */
+} 
 
 
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap');
+/* @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap');
 
 * {
   margin: 0;
@@ -126,10 +126,12 @@ body {
 }
 
 /* Reusable colors */
-:root {
+/* :root {
   --navy: #0F172A;
   --blue: #3B82F6;
   --amber: #F59E0B;
   --white: #F8FAFC;
   --gray: #94A3B8;
-}
+}  */
+
+@import "tailwindcss";
