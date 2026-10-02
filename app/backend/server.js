@@ -10,7 +10,7 @@ function isValidObjectId(id){
   return ObjectId.isValid(id);
 }
 
-app.get("/api/users", async (req, res) => {
+app.get("/api/users", async(req, res) => {
   try{
     const db = getDB();
     const users = db.collection("users");
@@ -25,7 +25,7 @@ app.get("/api/users", async (req, res) => {
   }
 });
 
-app.post("/api/signup", async (req, res) => {
+app.post("/api/signup", async(req, res) => {
   try{
     const { email, password, username } = req.body;
     if(!email || !password || !username){
@@ -52,7 +52,7 @@ app.post("/api/signup", async (req, res) => {
   }
 });
 
-app.post("/api/login", async (req, res) => {
+app.post("/api/login", async(req, res) => {
   try{
     const { email, password } = req.body;
     if(!email || !password){
@@ -75,7 +75,7 @@ app.post("/api/login", async (req, res) => {
   }
 });
 
-app.get("/api/users/:id", async (req, res) => {
+app.get("/api/users/:id", async(req, res) => {
   try{
     const { id } = req.params;
 
@@ -99,7 +99,7 @@ app.get("/api/users/:id", async (req, res) => {
   }
 });
 
-app.put("/api/users/:id", async (req, res) => {
+app.put("/api/users/:id", async(req, res) => {
   try{
     const { id } = req.params;
 
@@ -112,8 +112,8 @@ app.put("/api/users/:id", async (req, res) => {
     const users = db.collection("users");
 
     const result = await users.updateOne(
-     { _id: new ObjectId(id) },
-     { $set:{ username, bio } }
+    { _id: new ObjectId(id) },
+    { $set:{ username, bio } }
     );
 
     if(result.matchedCount === 0){
@@ -128,7 +128,7 @@ app.put("/api/users/:id", async (req, res) => {
   }
 });
 
-app.delete("/api/users/:id", async (req, res) => {
+app.delete("/api/users/:id", async(req, res) => {
   try{
     const { id } = req.params;
 
@@ -156,7 +156,7 @@ app.delete("/api/users/:id", async (req, res) => {
 //=======================       POSTS      ======================================
 //=======================       POSTS      ======================================
 
-app.get("/api/posts", async (req, res) => {
+app.get("/api/posts", async(req, res) => {
   try{
     const db = getDB();
     const posts = await db.collection("posts").find({}).toArray();
@@ -168,7 +168,7 @@ app.get("/api/posts", async (req, res) => {
   }
 });
 
-app.post("/api/posts", async (req, res) => {
+app.post("/api/posts", async(req, res) => {
   try{
     const { userId, caption, hashtags } = req.body;
     if(!userId || !caption){
@@ -205,7 +205,7 @@ app.post("/api/posts", async (req, res) => {
   }
 });
 
-app.put("/api/posts/:id", async (req, res) => {
+app.put("/api/posts/:id", async(req, res) => {
   try{
     const { id } = req.params;
 
@@ -218,7 +218,7 @@ app.put("/api/posts/:id", async (req, res) => {
 
     const result = await db.collection("posts").updateOne(
       { _id: new ObjectId(id) },
-      { $set: { caption, hashtags } }
+      { $set:{ caption, hashtags } }
     );
 
     if(result.matchedCount === 0){
@@ -233,7 +233,7 @@ app.put("/api/posts/:id", async (req, res) => {
   }
 });
 
-app.delete("/api/posts/:id", async (req, res) => {
+app.delete("/api/posts/:id", async(req, res) => {
   try{
     const { id } = req.params;
 
@@ -256,7 +256,7 @@ app.delete("/api/posts/:id", async (req, res) => {
   }
 });
 
-app.post("/api/posts/:id/comments", async (req, res) => {
+app.post("/api/posts/:id/comments", async(req, res) => {
   try{
     const { id } = req.params;
 
@@ -308,7 +308,7 @@ app.post("/api/posts/:id/comments", async (req, res) => {
   }
 });
 
-app.post("/api/posts/:id/report", async (req, res) => {
+app.post("/api/posts/:id/report", async(req, res) => {
   try{
     const { id } = req.params;
 
@@ -359,6 +359,179 @@ app.post("/api/posts/:id/report", async (req, res) => {
     res.status(500).json({ error: "Failed to report post" });
   }
 });
+
+//=======================       AlBUM      ======================================
+//=======================       AlBUM      ======================================
+//=======================       AlBUM      ======================================
+
+app.get("/api/albums", async(req, res) => {
+  try{
+    const db = getDB();
+    const albums = await db.collection("albums").find({}).toArray();
+    res.json(albums);
+  }
+  catch(err){
+    res.status(500).json({ error: "Failed to fetch albums" });
+  }
+});
+
+app.post("/api/albums", async(req, res) => {
+  try{
+    const { userId, name, description, hashtags } = req.body;
+    if(!userId || !name){
+      return res.status(400).json({ error: "User and album name required" });
+    }
+
+    const db = getDB();
+    const newAlbum = {
+      userId,
+      name,
+      description: description || "",
+      hashtags: hashtags || [],
+      posts: [],
+      createdAt: new Date()
+    };
+
+    const result = await db.collection("albums").insertOne(newAlbum);
+    res.json({ _id: result.insertedId, ...newAlbum });
+  }
+  catch(err){
+    res.status(500).json({ error: "Failed to create album" });
+  }
+});
+
+app.put("/api/albums/:id", async(req, res) => {
+  try{
+    const { id } = req.params;
+
+    if(!isValidObjectId(id)){
+      return res.status(400).json({ error: "Album ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    }
+
+    const { name, description, hashtags } = req.body;
+    const db = getDB();
+
+    const result = await db.collection("albums").updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set:{ name, description, hashtags } }
+    );
+
+    if(result.matchedCount === 0){
+      return res.status(404).json({ error: "Album not found" });
+    }
+
+    res.json({ success: true, message: "Album updated" });
+  }
+  catch(err){
+    res.status(500).json({ error: "Failed to update album" });
+  }
+});
+
+//add post to album
+app.put("/api/albums/:id/posts", async(req, res) => {
+  try{
+    const { id } = req.params;
+
+    if(!isValidObjectId(id)){
+      return res.status(400).json({ error: "Album ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    }
+
+    const { postId } = req.body;
+    if(!postId){
+      return res.status(400).json({ error: "Post ID required" });
+    }
+
+    if(!isValidObjectId(postId)){
+      return res.status(400).json({ error: "Post ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    }
+    
+    const db = getDB();
+
+    const post = await db.collection("posts").findOne({ _id: new ObjectId(postId) });
+    if(!post){
+      return res.status(404).json({ error: "Post not found" });
+    }
+
+    const result = await db.collection("albums").updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $addToSet:{ posts: postId } } // addToSet prevents duplicates
+    );
+
+    if(result.matchedCount === 0){
+      return res.status(404).json({ error: "Album not found" });
+    }
+
+    res.json({ success: true, message: "Post added to album" });
+  }
+  catch(err){
+    res.status(500).json({ error: "Failed to add post to album" });
+  }
+});
+
+//remove post from album
+app.delete("/api/albums/:id/posts/:postId", async(req, res) => {
+  try{
+    const { id , postId } = req.params;
+
+    if(!isValidObjectId(id)){
+      return res.status(400).json({ error: "Album ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    }
+
+    if(!isValidObjectId(postId)){
+      return res.status(400).json({ error: "Post ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    }
+
+    const db = getDB();
+
+    //check if post exists
+    const post = await db.collection("posts").findOne({ _id: new ObjectId(postId) });
+    if(!post){
+      return res.status(404).json({ error: "Post not found" });
+    }
+
+    //check if post is in album
+    const album = await db.collection("albums").findOne({ _id: new ObjectId(req.params.id) });
+    if(!album){
+      return res.status(404).json({ error: "Album not found" });
+    }
+
+    if(!album.posts.includes(postId)){
+      return res.status(400).json({ error: "Post is not in the album" });
+    }
+
+    const result = await db.collection("albums").updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $pull:{ posts: req.params.postId } }
+    );
+
+    if(result.matchedCount === 0){
+      return res.status(404).json({ error: "Album not found" });
+    }
+
+    res.json({ success: true, message: "Post removed from album" });
+  }
+  catch(err){
+    res.status(500).json({ error: "Failed to remove post from album" });
+  }
+});
+
+//delete album
+app.delete("/api/albums/:id", async(req, res) => {
+  try{
+    const db = getDB();
+    const result = await db.collection("albums").deleteOne({ _id: new ObjectId(req.params.id) });
+
+    if(result.deletedCount === 0){
+      return res.status(404).json({ error: "Album not found" });
+    }
+
+    res.json({ success: true, message: "Album deleted" });
+  }
+  catch(err){
+    res.status(500).json({ error: "Failed to delete album" });
+  }
+});
+
 
 async function startServer(){
     await connectToMongoDB();
