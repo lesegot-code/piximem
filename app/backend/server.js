@@ -371,6 +371,7 @@ app.get("/api/albums", async(req, res) => {
     res.json(albums);
   }
   catch(err){
+    console.error(err);
     res.status(500).json({ error: "Failed to fetch albums" });
   }
 });
@@ -382,9 +383,19 @@ app.post("/api/albums", async(req, res) => {
       return res.status(400).json({ error: "User and album name required" });
     }
 
+    if(!isValidObjectId(userId)){
+      return res.status(400).json({ error: "User ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    }
+
     const db = getDB();
+
+    const user = await db.collection("users").findOne({ _id: new ObjectId(userId) });
+    if(!user){
+      return res.status(404).json({ error: "User not found" });
+    }
+
     const newAlbum = {
-      userId,
+      userId: new ObjectId(userId),
       name,
       description: description || "",
       hashtags: hashtags || [],
@@ -396,6 +407,7 @@ app.post("/api/albums", async(req, res) => {
     res.json({ _id: result.insertedId, ...newAlbum });
   }
   catch(err){
+    console.error(err);
     res.status(500).json({ error: "Failed to create album" });
   }
 });
@@ -412,7 +424,7 @@ app.put("/api/albums/:id", async(req, res) => {
     const db = getDB();
 
     const result = await db.collection("albums").updateOne(
-      { _id: new ObjectId(req.params.id) },
+      { _id: new ObjectId(id) },
       { $set:{ name, description, hashtags } }
     );
 
@@ -423,6 +435,7 @@ app.put("/api/albums/:id", async(req, res) => {
     res.json({ success: true, message: "Album updated" });
   }
   catch(err){
+    console.error(err);
     res.status(500).json({ error: "Failed to update album" });
   }
 });
@@ -453,7 +466,7 @@ app.put("/api/albums/:id/posts", async(req, res) => {
     }
 
     const result = await db.collection("albums").updateOne(
-      { _id: new ObjectId(req.params.id) },
+      { _id: new ObjectId(id) },
       { $addToSet:{ posts: postId } } // addToSet prevents duplicates
     );
 
@@ -464,6 +477,7 @@ app.put("/api/albums/:id/posts", async(req, res) => {
     res.json({ success: true, message: "Post added to album" });
   }
   catch(err){
+    console.error(err);
     res.status(500).json({ error: "Failed to add post to album" });
   }
 });
@@ -490,7 +504,7 @@ app.delete("/api/albums/:id/posts/:postId", async(req, res) => {
     }
 
     //check if post is in album
-    const album = await db.collection("albums").findOne({ _id: new ObjectId(req.params.id) });
+    const album = await db.collection("albums").findOne({ _id: new ObjectId(id) });
     if(!album){
       return res.status(404).json({ error: "Album not found" });
     }
@@ -500,8 +514,8 @@ app.delete("/api/albums/:id/posts/:postId", async(req, res) => {
     }
 
     const result = await db.collection("albums").updateOne(
-      { _id: new ObjectId(req.params.id) },
-      { $pull:{ posts: req.params.postId } }
+      { _id: new ObjectId(id) },
+      { $pull:{ posts: postId } }
     );
 
     if(result.matchedCount === 0){
@@ -511,6 +525,7 @@ app.delete("/api/albums/:id/posts/:postId", async(req, res) => {
     res.json({ success: true, message: "Post removed from album" });
   }
   catch(err){
+    console.error(err);
     res.status(500).json({ error: "Failed to remove post from album" });
   }
 });
@@ -518,8 +533,14 @@ app.delete("/api/albums/:id/posts/:postId", async(req, res) => {
 //delete album
 app.delete("/api/albums/:id", async(req, res) => {
   try{
+    const { id } = req.params;
+
+    if(!isValidObjectId(id)){
+      return res.status(400).json({ error: "Album ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    }
+
     const db = getDB();
-    const result = await db.collection("albums").deleteOne({ _id: new ObjectId(req.params.id) });
+    const result = await db.collection("albums").deleteOne({ _id: new ObjectId(id) });
 
     if(result.deletedCount === 0){
       return res.status(404).json({ error: "Album not found" });
@@ -528,10 +549,171 @@ app.delete("/api/albums/:id", async(req, res) => {
     res.json({ success: true, message: "Album deleted" });
   }
   catch(err){
+    console.error(err);
     res.status(500).json({ error: "Failed to delete album" });
   }
 });
 
+//=======================       FRIENDS      =====================================
+//=======================       FRIENDS      =====================================
+//=======================       FRIENDS      =====================================
+
+// Send friend request
+app.post("/api/friends/:id/request", async(req, res) => {
+  try{
+    const { fromUserId } = req.body;
+    const toUserId = req.params.id;
+
+    if(!fromUserId){
+      return res.status(400).json({ error: "Sender user ID required" });
+    }
+
+    if(!isValidObjectId(fromUserId)){
+      return res.status(400).json({ error: "Sender user ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    }
+
+    if(!isValidObjectId(toUserId)){
+      return res.status(400).json({ error: "Recipient user ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    }
+
+    const db = getDB();
+    const users = db.collection("users");
+
+    const sender = await users.findOne({ _id: new ObjectId(fromUserId) });
+    if(!sender){
+      return res.status(404).json({ error: "Sender not found" });
+    }
+
+    const recipient = await users.findOne({ _id: new ObjectId(toUserId) });
+    if(!recipient){
+      return res.status(404).json({ error: "Recipient not found" });
+    }
+
+    if(fromUserId === toUserId){
+      return res.status(400).json({ error: "Cannot send a friend request to yourself" });
+    }
+
+    const result = await users.updateOne(
+      { _id: new ObjectId(toUserId) },
+      { $addToSet:{ friendRequests: fromUserId } }
+    );
+
+    res.json({ success: true, message: "Friend request sent" });
+  } 
+  catch(err){
+    console.error(err);
+    res.status(500).json({ error: "Failed to send friend request" });
+  }
+});
+
+// Accept friend request
+app.put("/api/friends/:id/accept", async(req, res) => {
+  try{
+    const { fromUserId } = req.body;
+    const toUserId = req.params.id;
+
+    if(!fromUserId){
+      return res.status(400).json({ error: "Sender user ID required" });
+    }
+
+    if(!isValidObjectId(fromUserId)){
+      return res.status(400).json({ error: "Sender user ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    }
+
+    if(!isValidObjectId(toUserId)){
+      return res.status(400).json({ error: "Recipient user ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    }
+
+    const db = getDB();
+    const users = db.collection("users");
+
+    const sender = await users.findOne({ _id: new ObjectId(fromUserId) });
+    if(!sender){
+      return res.status(404).json({ error: "Sender not found" });
+    }
+
+    const recipient = await users.findOne({ _id: new ObjectId(toUserId) });
+    if(!recipient){
+      return res.status(404).json({ error: "Recipient not found" });
+    }
+
+    if(!recipient.friendRequests || !recipient.friendRequests.includes(fromUserId)){
+      return res.status(400).json({ error: "Friend request not found" });
+    }
+
+    await users.updateOne(
+      { _id: new ObjectId(toUserId) },
+      {
+        $pull:{ friendRequests: fromUserId },
+        $addToSet:{ friends: fromUserId }
+      }
+    );
+
+    await users.updateOne(
+      { _id: new ObjectId(fromUserId) },
+      { $addToSet:{ friends: toUserId } }
+    );
+
+    res.json({ success: true, message: "Friend request accepted" });
+  } 
+  catch(err){
+    console.error(err);
+    res.status(500).json({ error: "Failed to accept friend request" });
+  }
+});
+
+// Unfriend
+app.delete("/api/friends/:id/remove", async(req, res) => {
+  try{
+    const { fromUserId } = req.body;
+    const toUserId = req.params.id;
+
+    if(!fromUserId){
+      return res.status(400).json({ error: "User ID required" });
+    }
+
+    if(!isValidObjectId(fromUserId)){
+      return res.status(400).json({ error: "User ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    }
+
+    if(!isValidObjectId(toUserId)){
+      return res.status(400).json({ error: "Recipient user ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    }
+
+    const db = getDB();
+    const users = db.collection("users");
+
+    if(fromUserId === toUserId){
+      return res.status(400).json({ error: "Cannot unfriend yourself" });
+    }
+
+    const sender = await users.findOne({ _id: new ObjectId(fromUserId) });
+    if(!sender){
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const recipient = await users.findOne({ _id: new ObjectId(toUserId) });
+    if(!recipient){
+      return res.status(404).json({ error: "Recipient not found" });
+    }
+
+    await users.updateOne(
+      { _id: new ObjectId(toUserId) },
+      { $pull:{ friends: fromUserId } }
+    );
+
+    await users.updateOne(
+      { _id: new ObjectId(fromUserId) },
+      { $pull:{ friends: toUserId } }
+    );
+
+    res.json({ success: true, message: "Unfriended successfully" });
+  } 
+  catch(err){
+    console.error(err);
+    res.status(500).json({ error: "Failed to unfriend user" });
+  }
+});
 
 async function startServer(){
     await connectToMongoDB();
@@ -540,6 +722,5 @@ async function startServer(){
       console.log("Backend running on port 3000");
     });
 }
-
 
 startServer();
