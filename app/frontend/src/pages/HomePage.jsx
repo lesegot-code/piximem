@@ -1,27 +1,36 @@
 // Student number: 25143230
-import { useState } from "react";
-import PostPreview from "../components/PostPreview";
+import{ useEffect, useState } from "react";
+import{ getPosts } from "../api";
 
-const dummyPosts = [
-    { id: 1, username: "Lesego", caption: "Beautiful sunset!", hashtags: ["#nature"], likes: 12 },
-    { id: 2, username: "Fatso", caption: "My new puppy!", hashtags: ["#cute"], likes: 45 }
-];
+export default function HomePage(){
+    const [posts, setPosts] = useState([]);
 
-function HomePage(){
-    const [search, setSearch] = useState("");
+    // async function loadPosts(){
+    //     const data = await getPosts();
+    //     setPosts(data);
+    // }
 
-    const filtered = dummyPosts.filter(p =>
-        p.username.toLowerCase().includes(search.toLowerCase()) ||
-        p.caption.toLowerCase().includes(search.toLowerCase())
-    );
+    useEffect(() =>{
+        async function loadPosts(){
+            const data = await getPosts();
+            setPosts(data);
+        }
+        loadPosts();
+    }, []);
 
     return (
-        <div>
-            <h2>Home Feed</h2>
-            <input type="text" placeholder="Search posts..." value={search} onChange={e => setSearch(e.target.value)} />
-            {filtered.map(post => <PostPreview key={post.id} post={post} />)}
+        <div className="p-6 bg-gray-50 min-h-screen">
+            <h2 className="text-2xl font-bold text-primary mb-4">Home Feed</h2>
+            <div className="space-y-6">
+                {posts.map((post) => (
+                    <div key={post._id} className="bg-white shadow rounded-lg p-4">
+                        <h3 className="font-semibold text-lg">{post.caption}</h3>
+                        <p className="text-gray-600">By User{post.userId}</p>
+                        <p className="text-sm text-accent">{post.hashtags?.join(" ")}</p>
+                    </div>
+                ))}
+            </div>
         </div>
-    );
+  );
 }
 
-export default HomePage;

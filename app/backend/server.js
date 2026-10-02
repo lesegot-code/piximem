@@ -1,9 +1,11 @@
 // Student number: 25143230
 import{ ObjectId } from "mongodb";
 import express from "express";
+import cors from "cors";
 import{ connectToMongoDB, getDB } from "./db.js";
 
 const app = express();
+app.use(cors());
 app.use(express.json());
 
 function isValidObjectId(id){
