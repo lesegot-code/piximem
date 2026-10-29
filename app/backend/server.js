@@ -7,6 +7,9 @@ import fs from "node:fs";
 import { ObjectId } from "mongodb";
 import { connectToMongoDB, getDB } from "./db.js";
 
+import fs from "node:fs";
+import path from "node:path";
+
 const app = express();
 const UPLOAD_DIR = path.join(import.meta.dirname, "uploads");
 
@@ -948,6 +951,23 @@ app.use((err, req, res, next) =>
 async function startServer()
 {
   await connectToMongoDB();
+
+  const SEED_DIR = path.join(import.meta.dirname, "seed-images");
+
+  if(fs.existsSync(SEED_DIR))
+  {
+    const files = fs.readdirSync(SEED_DIR);
+    for(const file of files)
+    {
+      const src = path.join(SEED_DIR, file);
+      const dest = path.join(UPLOAD_DIR, file);
+      if(!fs.existsSync(dest))
+      {
+        fs.copyFileSync(src, dest);
+        console.log("Seeded image:", file);
+      }
+    }
+  }
 
   app.listen(3000, () =>
   {
