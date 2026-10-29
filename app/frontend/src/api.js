@@ -1,5 +1,5 @@
 // Student number: u25143230
-const BASE_URL = "/api";
+const BASE_URL = "http://localhost:3000/api";
 
 //helper: check res.ok and parse JSON once
 async function request(path, options = {}) {
