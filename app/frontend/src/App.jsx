@@ -1,24 +1,56 @@
-// Student number: 25143230
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import SplashPage from './pages/SplashPage';
-import HomePage from './pages/HomePage';
-import ProfilePage from './pages/ProfilePage';
-import PostPage from './pages/PostPage';
-import Navigation from './components/Navigation';
-import NotFound from './pages/NotFound';
+import { Routes, Route, Navigate } from "react-router-dom";
+import { useAuth } from "./context/AuthContext.jsx";
+import Navigation from "./components/Navigation.jsx";
+import SplashPage from "./pages/SplashPage.jsx";
+import HomePage from "./pages/HomePage.jsx";
+import ProfilePage from "./pages/ProfilePage.jsx";
+import PostPage from "./pages/PostPage.jsx";
+import NotFound from "./pages/NotFound.jsx";
 
-function App() {
-  return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<SplashPage />} />
-        <Route path="/home" element={<><Navigation /><HomePage /></>} />
-        <Route path="/profile/:userId" element={<><Navigation /><ProfilePage /></>} />
-        <Route path="/post/:postId" element={<><Navigation /><PostPage /></>} />
-        <Route path="*" element={<NotFound />} />
-      </Routes>
-    </BrowserRouter>
+//wrapper to hide the navbar on the splash page
+function Layout({ children }) 
+{
+  const { user } = useAuth();
+  return(
+    <>
+      {user && <Navigation />}
+      <main className="max-w-6xl mx-auto px-4 py-6">{children}</main>
+    </>
   );
 }
 
-export default App;
+//route guard - redirect to "/" if not logged in
+function PrivateRoute({ children }) {
+  const { user } = useAuth();
+  return user ? children : <Navigate to="/" replace />;
+}
+
+export default function App() {
+  const { user } = useAuth();
+
+  return (
+    <Routes>
+      {/* Splash: no navbar */}
+      <Route 
+        path="/"
+        element={user ? <Navigate to="/home" replace /> : <SplashPage />}
+      />
+
+      {/* everything has navbar */}
+      <Route
+        path="/home"
+        element={<PrivateRoute><Layout><HomePage /></Layout></PrivateRoute>}
+      />
+      <Route
+        path="/profile/:id"
+        element={<PrivateRoute><Layout><ProfilePage /></Layout></PrivateRoute>}
+      />
+      <Route
+        path="/post/:id"
+        element={<PrivateRoute><Layout><PostPage /></Layout></PrivateRoute>}
+      />
+
+      <Route path="*" element={<NotFound />} />
+    </Routes>
+  );
+}
