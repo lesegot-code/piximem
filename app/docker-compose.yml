@@ -3,6 +3,7 @@ version: '3.8'
 services:
   backend:
     build: ./backend
+    container_name: piximem-backend
     ports:
       - "3000:3000"
     env_file:
@@ -10,9 +11,12 @@ services:
     volumes:
       - ./backend:/app
       - /app/node_modules
+      - uploads-data:/app/uploads
+    restart: unless-stopped
 
   frontend:
     build: ./frontend
+    container_name: piximem-frontend
     ports:
       - "5173:5173"
     volumes:
@@ -20,3 +24,7 @@ services:
       - /app/node_modules
     depends_on:
       - backend
+    restart: unless-stopped
+
+volumes:
+  uploads-data:
