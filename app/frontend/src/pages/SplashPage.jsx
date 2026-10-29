@@ -68,10 +68,10 @@ export default function SplashPage()
         });
         navigate("/home");
       } 
-      else 
+      else
       {
         const result = await login({ email: form.email, password: form.password });
-        loginUser({ _id: result.userId, email: form.email });
+        loginUser(result.user);
         navigate("/home");
       }
     } 
