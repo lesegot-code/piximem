@@ -1,115 +1,89 @@
-// Student number: 25143230
-const BASE_URL = "http://localhost:3000/api";
+// Student number: u25143230
+const BASE_URL = "/api";
 
-//=======================       USERS      ======================================
-//=======================       USERS      ======================================
-//=======================       USERS      ======================================
-export async function signup(user){
-    const res = await fetch(`${BASE_URL}/signup`,{
-        method: "POST",
-        headers:{ "Content-Type": "application/json" },
-        body: JSON.stringify(user),
-    });
-    return res.json();
+//helper: check res.ok and parse JSON once
+async function request(path, options = {}) {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    ...options,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || "Something went wrong");
+  }
+  return data;
 }
 
-export async function login(credentials){
-    const res = await fetch(`${BASE_URL}/login`,{
-        method: "POST",
-        headers:{ "Content-Type": "application/json" },
-        body: JSON.stringify(credentials),
-    });
-    return res.json();
-}
+//======================= USERS ==========================
+export const signup = (user) =>
+  request("/signup", { method: "POST", body: JSON.stringify(user) });
 
-export async function getUser(id){
-    const res = await fetch(`${BASE_URL}/users/${id}`);
-    return res.json();
-}
+export const login = (credentials) =>
+  request("/login", { method: "POST", body: JSON.stringify(credentials) });
 
-export async function updateUser(id, updates){
-    const res = await fetch(`${BASE_URL}/users/${id}`,{
-        method: "PUT",
-        headers:{ "Content-Type": "application/json" },
-        body: JSON.stringify(updates),
-    });
-    return res.json();
-}
+export const getUser = (id) => request(`/users/${id}`);
 
-//=======================       POSTS      ======================================
-//=======================       POSTS      ======================================
-//=======================       POSTS      ======================================
-export async function getPosts(){
-    const res = await fetch(`${BASE_URL}/posts`);
-    return res.json();
-}
+export const updateUser = (id, updates) =>
+  request(`/users/${id}`, { method: "PUT", body: JSON.stringify(updates) });
 
-export async function createPost(post){
-    const res = await fetch(`${BASE_URL}/posts`,{
-        method: "POST",
-        headers:{ "Content-Type": "application/json" },
-        body: JSON.stringify(post),
-    });
-    return res.json();
-}
+export const deleteUser = (id) =>
+  request(`/users/${id}`, { method: "DELETE" });
 
-export async function updatePost(id, updates){
-    const res = await fetch(`${BASE_URL}/posts/${id}`,{
-        method: "PUT",
-        headers:{ "Content-Type": "application/json" },
-        body: JSON.stringify(updates),
-    });
-    return res.json();
-}
+export const getAllUsers = () => request("/users");
 
-export async function deletePost(id){
-    const res = await fetch(`${BASE_URL}/posts/${id}`,{ method: "DELETE" });
-    return res.json();
-}
+//======================= POSTS ==========================
+export const getPosts = () => request("/posts");
+export const getPost = (id) => request(`/posts/${id}`);
+export const createPost = (post) =>
+  request("/posts", { method: "POST", body: JSON.stringify(post) });
+export const updatePost = (id, updates) =>
+  request(`/posts/${id}`, { method: "PUT", body: JSON.stringify(updates) });
+export const deletePost = (id) =>
+  request(`/posts/${id}`, { method: "DELETE" });
 
-//=======================       ALBUMS      ======================================
-//=======================       ALBUMS      ======================================
-//=======================       ALBUMS      ======================================
-export async function getAlbums(){
-    const res = await fetch(`${BASE_URL}/albums`);
-    return res.json();
-}
+export const addComment = (postId, userId, text) =>
+  request(`/posts/${postId}/comments`, {
+    method: "POST",
+    body: JSON.stringify({ userId, text }),
+  });
 
-export async function createAlbum(album){
-    const res = await fetch(`${BASE_URL}/albums`,{
-        method: "POST",
-        headers:{ "Content-Type": "application/json" },
-        body: JSON.stringify(album),
-    });
-    return res.json();
-}
+export const reportPost = (postId, userId, reason) =>
+  request(`/posts/${postId}/report`, {
+    method: "POST",
+    body: JSON.stringify({ userId, reason }),
+  });
 
-//=======================       FRIENDS      =====================================
-//=======================       FRIENDS      =====================================
-//=======================       FRIENDS      =====================================
-export async function sendFriendRequest(toUserId, fromUserId){
-    const res = await fetch(`${BASE_URL}/friends/${toUserId}/request`,{
-        method: "POST",
-        headers:{ "Content-Type": "application/json" },
-        body: JSON.stringify({ fromUserId }),
-    });
-    return res.json();
-}
+//======================= ALBUMS ==========================
+export const getAlbums = () => request("/albums");
+export const createAlbum = (album) =>
+  request("/albums", { method: "POST", body: JSON.stringify(album) });
+export const updateAlbum = (id, updates) =>
+  request(`/albums/${id}`, { method: "PUT", body: JSON.stringify(updates) });
+export const deleteAlbum = (id) =>
+  request(`/albums/${id}`, { method: "DELETE" });
+export const addPostToAlbum = (albumId, postId) =>
+  request(`/albums/${albumId}/posts`, {
+    method: "PUT",
+    body: JSON.stringify({ postId }),
+  });
+export const removePostFromAlbum = (albumId, postId) =>
+  request(`/albums/${albumId}/posts/${postId}`, { method: "DELETE" });
 
-export async function acceptFriendRequest(toUserId, fromUserId){
-    const res = await fetch(`${BASE_URL}/friends/${toUserId}/accept`,{
-        method: "PUT",
-        headers:{ "Content-Type": "application/json" },
-        body: JSON.stringify({ fromUserId }),
-    });
-    return res.json();
-}
+//======================= FRIENDS ==========================
+export const sendFriendRequest = (toUserId, fromUserId) =>
+  request(`/friends/${toUserId}/request`, {
+    method: "POST",
+    body: JSON.stringify({ fromUserId }),
+  });
 
-export async function unfriend(toUserId, fromUserId){
-    const res = await fetch(`${BASE_URL}/friends/${toUserId}/remove`,{
-        method: "DELETE",
-        headers:{ "Content-Type": "application/json" },
-        body: JSON.stringify({ fromUserId }),
-    });
-    return res.json();
-}
+export const acceptFriendRequest = (toUserId, fromUserId) =>
+  request(`/friends/${toUserId}/accept`, {
+    method: "PUT",
+    body: JSON.stringify({ fromUserId }),
+  });
+
+export const unfriend = (toUserId, fromUserId) =>
+  request(`/friends/${toUserId}/remove`, {
+    method: "DELETE",
+    body: JSON.stringify({ fromUserId }),
+  });
