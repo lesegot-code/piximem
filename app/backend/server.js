@@ -7,9 +7,6 @@ import fs from "node:fs";
 import { ObjectId } from "mongodb";
 import { connectToMongoDB, getDB } from "./db.js";
 
-import fs from "node:fs";
-import path from "node:path";
-
 const app = express();
 const UPLOAD_DIR = path.join(import.meta.dirname, "uploads");
 
