@@ -14,6 +14,14 @@ async function request(path, options = {}) {
   return data;
 }
 
+// helper: used by profile page
+export const buildImageUrl = (filenameOrUrl) =>
+{
+  if(!filenameOrUrl) return null;
+  if(filenameOrUrl.startsWith("http")) return filenameOrUrl;
+  return `http://localhost:3000/uploads/${filenameOrUrl}`;
+};
+
 //======================= USERS ==========================
 export const signup = (user) =>
   request("/signup", { method: "POST", body: JSON.stringify(user) });
@@ -23,8 +31,30 @@ export const login = (credentials) =>
 
 export const getUser = (id) => request(`/users/${id}`);
 
-export const updateUser = (id, updates) =>
-  request(`/users/${id}`, { method: "PUT", body: JSON.stringify(updates) });
+// users
+export const updateUser = async(id, updates) =>
+{
+  if(updates.avatar instanceof File)
+  {
+    const form = new FormData();
+    if(updates.username !== undefined) form.append("username", updates.username);
+    if(updates.bio !== undefined) form.append("bio", updates.bio);
+    form.append("avatar", updates.avatar);
+
+    const res = await fetch(`${BASE_URL}/users/${id}`, {
+      method: "PUT",
+      body: form,
+    });
+    const data = await res.json().catch(() => ({}));
+    if(!res.ok) throw new Error(data.error || "Failed to update profile");
+    return data;
+  }
+
+  return request(`/users/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(updates),
+  });
+};
 
 export const deleteUser = (id) =>
   request(`/users/${id}`, { method: "DELETE" });
@@ -34,8 +64,24 @@ export const getAllUsers = () => request("/users");
 //======================= POSTS ==========================
 export const getPosts = () => request("/posts");
 export const getPost = (id) => request(`/posts/${id}`);
-export const createPost = (post) =>
-  request("/posts", { method: "POST", body: JSON.stringify(post) });
+export const createPost = async({ userId, caption, hashtags, image }) =>
+{
+  const form = new FormData();
+  form.append("userId", userId);
+  form.append("caption", caption);
+  form.append("hashtags", JSON.stringify(hashtags));
+  if(image) form.append("image", image);
+
+  const res = await fetch(`${BASE_URL}/posts`, {
+    method: "POST",
+    body: form
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if(!res.ok) throw new Error(data.error || "Failed to create post");
+  return data;
+};
+
 export const updatePost = (id, updates) =>
   request(`/posts/${id}`, { method: "PUT", body: JSON.stringify(updates) });
 export const deletePost = (id) =>
@@ -84,6 +130,24 @@ export const acceptFriendRequest = (toUserId, fromUserId) =>
 
 export const unfriend = (toUserId, fromUserId) =>
   request(`/friends/${toUserId}/remove`, {
+    method: "DELETE",
+    body: JSON.stringify({ fromUserId }),
+  });
+
+// ==================== COMMENTS ==========================
+
+// helper: fetch all albums that contain a given post
+export const getAlbumsForPost = async(postId) =>
+{
+  const albums = await getAlbums();
+  return albums.filter((a) =>
+    (a.posts || []).some((p) => p.toString() === postId.toString())
+  );
+};
+
+// ==================== FRIEND DECLINE ====================
+export const declineFriendRequest = (toUserId, fromUserId) =>
+  request(`/friends/${toUserId}/decline`, {
     method: "DELETE",
     body: JSON.stringify({ fromUserId }),
   });
