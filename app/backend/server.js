@@ -1,218 +1,407 @@
-// Student number: 25143230
-import{ ObjectId } from "mongodb";
+// Student Number: u25143230
 import express from "express";
 import cors from "cors";
-import{ connectToMongoDB, getDB } from "./db.js";
+import multer from "multer";
+import path from "node:path";
+import fs from "node:fs";
+import { ObjectId } from "mongodb";
+import { connectToMongoDB, getDB } from "./db.js";
 
 const app = express();
+const UPLOAD_DIR = path.join(import.meta.dirname, "uploads");
+
+if(!fs.existsSync(UPLOAD_DIR))
+{
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
+
 app.use(cors());
 app.use(express.json());
 
-function isValidObjectId(id){
+app.use("/uploads", express.static(UPLOAD_DIR));
+
+//======================== multer =============================
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, UPLOAD_DIR),
+  filename: (req, file, cb) =>
+  {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    cb(null, `${unique}${ext}`);
+  },
+});
+
+function imageOnly(req, file, cb)
+{
+  if(file.mimetype.startsWith("image/"))
+  {
+    cb(null, true);
+  }
+  else
+  {
+    cb(new Error("Only image files are allowed."));
+  }
+}
+
+const upload = multer({
+  storage,
+  fileFilter: imageOnly,
+  limits: { fileSize: 5 * 1024 * 1024 }, //5 MB
+});
+
+//======================== helpers ============================
+
+function isValidObjectId(id)
+{
   return ObjectId.isValid(id);
 }
 
-app.get("/api/users", async(req, res) => {
-  try{
-    const db = getDB();
-    const users = db.collection("users");
+//build full image URL (so the browser can load it)
+function imageUrl(req, filename)
+{
+  if(!filename) return null;
+  //if already a full URL, leave it
+  if(filename.startsWith("http")) return filename;
+  return `${req.protocol}://${req.get("host")}/uploads/${filename}`;
+}
 
-    //fetch all users
-    const allUsers = await users.find({}).toArray();
+//======================== users ==============================
+
+app.get("/api/users", async(req, res) =>
+{
+  try
+  {
+    const db = getDB();
+    const allUsers = await db.collection("users").find({}).toArray();
     res.json(allUsers);
-  } 
-  catch(err){
+  }
+  catch(err)
+  {
     console.error(err);
     res.status(500).json({ error: "Failed to fetch users" });
   }
 });
 
-app.post("/api/signup", async(req, res) => {
-  try{
+app.post("/api/signup", async(req, res) =>
+{
+  try
+  {
     const { email, password, username } = req.body;
-    if(!email || !password || !username){
+
+    if(!email || !password || !username)
+    {
       return res.status(400).json({ error: "All fields are required" });
     }
 
     const db = getDB();
     const users = db.collection("users");
 
-    // Check if user already exists
     const existing = await users.findOne({ email });
-    if(existing){
+    if(existing)
+    {
       return res.status(400).json({ error: "Email already registered" });
     }
 
-    const newUser = { email, password, username, friends: [] };
+    //start every user with a generated avatar
+    const newUser = {
+      email,
+      password,
+      username,
+      bio: "",
+      avatar: null,
+      friends: [],
+      friendRequests: [],
+      isAdmin: false,
+      createdAt: new Date(),
+    };
+
     const result = await users.insertOne(newUser);
 
-    res.json({ _id: result.insertedId, email, username });
-  } 
-  catch(err){
+    res.json({
+      _id: result.insertedId,
+      email,
+      username,
+      avatar: null,
+    });
+  }
+  catch(err)
+  {
     console.error(err);
     res.status(500).json({ error: "Signup failed" });
   }
 });
 
-app.post("/api/login", async(req, res) => {
-  try{
+app.post("/api/login", async(req, res) =>
+{
+  try
+  {
     const { email, password } = req.body;
-    if(!email || !password){
+
+    if(!email || !password)
+    {
       return res.status(400).json({ error: "Email and password required" });
     }
 
     const db = getDB();
-    const users = db.collection("users");
+    const user = await db.collection("users").findOne({ email, password });
 
-    const user = await users.findOne({ email, password });
-    if(!user){
+    if(!user)
+    {
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
-    res.json({ success: true, userId: user._id, token: "dummy-token" });
-  } 
-  catch(err){
+    //return full user object
+    //prevent second fetch from frontend
+    res.json({
+      success: true,
+      user: {
+        _id: user._id,
+        email: user.email,
+        username: user.username,
+        avatar: user.avatar || null,
+        isAdmin: user.isAdmin || false,
+      },
+      token: "dummy-token",
+    });
+  }
+  catch(err)
+  {
     console.error(err);
     res.status(500).json({ error: "Login failed" });
   }
 });
 
-app.get("/api/users/:id", async(req, res) => {
-  try{
+app.get("/api/users/:id", async(req, res) =>
+{
+  try
+  {
     const { id } = req.params;
 
-    if(!isValidObjectId(id)){
-      return res.status(400).json({ error: "ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    if(!isValidObjectId(id))
+    {
+      return res.status(400).json({ error: "Invalid user id" });
     }
 
     const db = getDB();
-    const users = db.collection("users");
+    const user = await db.collection("users").findOne({ _id: new ObjectId(id) });
 
-    const user = await users.findOne({ _id: new ObjectId(id) });
-    if(!user){
+    if(!user)
+    {
       return res.status(404).json({ error: "User not found" });
     }
 
-    res.json(user);
-  } 
-  catch(err){
+    // never send the password back
+    const { password, ...safeUser } = user;
+    res.json(safeUser);
+  }
+  catch(err)
+  {
     console.error(err);
     res.status(500).json({ error: "Failed to fetch user profile" });
   }
 });
 
-app.put("/api/users/:id", async(req, res) => {
-  try{
+//update profile - accepts multipart so avatar can be uploaded
+app.put("/api/users/:id", upload.single("avatar"), async(req, res) =>
+{
+  try
+  {
     const { id } = req.params;
 
-    if(!isValidObjectId(id)){
-      return res.status(400).json({ error: "ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    if(!isValidObjectId(id))
+    {
+      return res.status(400).json({ error: "Invalid user id" });
     }
 
-    const { username, bio } = req.body;
     const db = getDB();
-    const users = db.collection("users");
 
-    const result = await users.updateOne(
-    { _id: new ObjectId(id) },
-    { $set:{ username, bio } }
+    //build updates only from what was sent (nothing else gets overwritten)
+    const updates = {};
+    if(req.body.username !== undefined) updates.username = req.body.username;
+    if(req.body.bio !== undefined) updates.bio = req.body.bio;
+    if(req.file) updates.avatar = req.file.filename;
+
+    const result = await db.collection("users").updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updates }
     );
 
-    if(result.matchedCount === 0){
+    if(result.matchedCount === 0)
+    {
       return res.status(404).json({ error: "User not found" });
     }
 
     res.json({ success: true, message: "Profile updated" });
-  } 
-  catch(err){
+  }
+  catch(err)
+  {
     console.error(err);
     res.status(500).json({ error: "Failed to update profile" });
   }
 });
 
-app.delete("/api/users/:id", async(req, res) => {
-  try{
+app.delete("/api/users/:id", async(req, res) =>
+{
+  try
+  {
     const { id } = req.params;
 
-    if(!isValidObjectId(id)){
-      return res.status(400).json({ error: "ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    if(!isValidObjectId(id))
+    {
+      return res.status(400).json({ error: "Invalid user id" });
     }
 
     const db = getDB();
-    const users = db.collection("users");
+    const result = await db.collection("users").deleteOne({ _id: new ObjectId(id) });
 
-    const result = await users.deleteOne({ _id: new ObjectId(id) });
-    if(result.deletedCount === 0){
+    if(result.deletedCount === 0)
+    {
       return res.status(404).json({ error: "User not found" });
     }
 
     res.json({ success: true, message: "User deleted" });
-  } 
-  catch(err){
+  }
+  catch(err)
+  {
     console.error(err);
     res.status(500).json({ error: "Failed to delete user" });
   }
 });
 
-//=======================       POSTS      ======================================
-//=======================       POSTS      ======================================
-//=======================       POSTS      ======================================
+//======================== posts ==============================
 
-app.get("/api/posts", async(req, res) => {
-  try{
+app.get("/api/posts", async(req, res) =>
+{
+  try
+  {
     const db = getDB();
     const posts = await db.collection("posts").find({}).toArray();
-    res.json(posts);
-  } 
-  catch(err){
+
+    //attach image URLs so frontend can just use post.imageUrl
+    const enriched = posts.map((p) => ({
+      ...p,
+      imageUrl: imageUrl(req, p.image),
+    }));
+
+    res.json(enriched);
+  }
+  catch(err)
+  {
     console.error(err);
     res.status(500).json({ error: "Failed to fetch posts" });
   }
 });
 
-app.post("/api/posts", async(req, res) => {
-  try{
-    const { userId, caption, hashtags } = req.body;
-    if(!userId || !caption){
-      return res.status(400).json({ error: "User and caption required" });
-    }
+//get one post
+app.get("/api/posts/:id", async(req, res) =>
+{
+  try
+  {
+    const { id } = req.params;
 
-    if(!isValidObjectId(userId)){
-      return res.status(400).json({ error: "User ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    if(!isValidObjectId(id))
+    {
+      return res.status(400).json({ error: "Invalid post id" });
     }
 
     const db = getDB();
-    const users = db.collection("users");
+    const post = await db.collection("posts").findOne({ _id: new ObjectId(id) });
 
-    const user = await users.findOne({ _id: new ObjectId(userId) });
-    if(!user){
+    if(!post)
+    {
+      return res.status(404).json({ error: "Post not found" });
+    }
+
+    res.json({ ...post, imageUrl: imageUrl(req, post.image) });
+  }
+  catch(err)
+  {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch post" });
+  }
+});
+
+//create post: accepts multipart so image can be uploaded
+app.post("/api/posts", upload.single("image"), async(req, res) =>
+{
+  try
+  {
+    const { userId, caption, hashtags } = req.body;
+
+    if(!userId || !caption)
+    {
+      return res.status(400).json({ error: "User and caption required" });
+    }
+
+    if(!isValidObjectId(userId))
+    {
+      return res.status(400).json({ error: "Invalid user id" });
+    }
+
+    if(!req.file)
+    {
+      return res.status(400).json({ error: "Please upload an image" });
+    }
+
+    const db = getDB();
+
+    const user = await db.collection("users").findOne({ _id: new ObjectId(userId) });
+    if(!user)
+    {
       return res.status(404).json({ error: "User not found" });
+    }
+
+    //hashtags can come as JSON string in multipart form
+    let parsedHashtags = [];
+    if(hashtags)
+    {
+      try
+      {
+        parsedHashtags = typeof hashtags === "string" ? JSON.parse(hashtags) : hashtags;
+      }
+      catch
+      {
+        //split if: plain comma string
+        parsedHashtags = hashtags.split(",").map((h) => h.trim()).filter(Boolean);
+      }
     }
 
     const newPost = {
       userId: new ObjectId(userId),
       caption,
-      hashtags: hashtags || [],
+      hashtags: parsedHashtags,
+      image: req.file.filename,
       comments: [],
       reports: [],
-      createdAt: new Date()
+      createdAt: new Date(),
     };
 
     const result = await db.collection("posts").insertOne(newPost);
-    res.json({ _id: result.insertedId, ...newPost });
-  } 
-  catch(err){
+
+    res.json({
+      _id: result.insertedId,
+      ...newPost,
+      imageUrl: imageUrl(req, newPost.image),
+    });
+  }
+  catch(err)
+  {
     console.error(err);
     res.status(500).json({ error: "Failed to create post" });
   }
 });
 
-app.put("/api/posts/:id", async(req, res) => {
-  try{
+//update post caption/hashtags (not image)
+app.put("/api/posts/:id", async(req, res) =>
+{
+  try
+  {
     const { id } = req.params;
 
-    if(!isValidObjectId(id)){
-      return res.status(400).json({ error: "ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    if(!isValidObjectId(id))
+    {
+      return res.status(400).json({ error: "Invalid post id" });
     }
 
     const { caption, hashtags } = req.body;
@@ -220,179 +409,196 @@ app.put("/api/posts/:id", async(req, res) => {
 
     const result = await db.collection("posts").updateOne(
       { _id: new ObjectId(id) },
-      { $set:{ caption, hashtags } }
+      { $set: { caption, hashtags } }
     );
 
-    if(result.matchedCount === 0){
+    if(result.matchedCount === 0)
+    {
       return res.status(404).json({ error: "Post not found" });
     }
 
     res.json({ success: true, message: "Post updated" });
-  } 
-  catch(err){
+  }
+  catch(err)
+  {
     console.error(err);
     res.status(500).json({ error: "Failed to update post" });
   }
 });
 
-app.delete("/api/posts/:id", async(req, res) => {
-  try{
+app.delete("/api/posts/:id", async(req, res) =>
+{
+  try
+  {
     const { id } = req.params;
 
-    if(!isValidObjectId(id)){
-      return res.status(400).json({ error: "ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    if(!isValidObjectId(id))
+    {
+      return res.status(400).json({ error: "Invalid post id" });
     }
 
     const db = getDB();
     const result = await db.collection("posts").deleteOne({ _id: new ObjectId(id) });
 
-    if(result.deletedCount === 0){
+    if(result.deletedCount === 0)
+    {
       return res.status(404).json({ error: "Post not found" });
     }
 
     res.json({ success: true, message: "Post deleted" });
-  } 
-  catch(err){
+  }
+  catch(err)
+  {
     console.error(err);
     res.status(500).json({ error: "Failed to delete post" });
   }
 });
 
-app.post("/api/posts/:id/comments", async(req, res) => {
-  try{
+app.post("/api/posts/:id/comments", async(req, res) =>
+{
+  try
+  {
     const { id } = req.params;
 
-    if(!isValidObjectId(id)){
-      return res.status(400).json({ error: "Post ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    if(!isValidObjectId(id))
+    {
+      return res.status(400).json({ error: "Invalid post id" });
     }
 
     const { userId, text } = req.body;
-    if(!userId || !text){
+
+    if(!userId || !text)
+    {
       return res.status(400).json({ error: "User and text required" });
     }
 
-    if(!isValidObjectId(userId)){
-      return res.status(400).json({ error: "User ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    if(!isValidObjectId(userId))
+    {
+      return res.status(400).json({ error: "Invalid user id" });
     }
 
     const db = getDB();
 
-    const post = await db.collection("posts").findOne({ _id: new ObjectId(id) });
-    if(!post){
-      return res.status(404).json({ error: "Post not found" });
-    }
-
     const user = await db.collection("users").findOne({ _id: new ObjectId(userId) });
-    if(!user){
+    if(!user)
+    {
       return res.status(404).json({ error: "User not found" });
     }
 
     const comment = {
+      _id: new ObjectId(),
       userId: new ObjectId(userId),
+      username: user.username,
       text,
-      createdAt: new Date()
+      createdAt: new Date(),
     };
 
     const result = await db.collection("posts").updateOne(
       { _id: new ObjectId(id) },
-      { $push:{ comments: comment } }
+      { $push: { comments: comment } }
     );
 
-    if(result.matchedCount === 0){
+    if(result.matchedCount === 0)
+    {
       return res.status(404).json({ error: "Post not found" });
     }
 
     res.json({ success: true, comment });
-  } 
-  catch(err){
+  }
+  catch(err)
+  {
     console.error(err);
     res.status(500).json({ error: "Failed to add comment" });
   }
 });
 
-app.post("/api/posts/:id/report", async(req, res) => {
-  try{
+app.post("/api/posts/:id/report", async(req, res) =>
+{
+  try
+  {
     const { id } = req.params;
 
-    if(!isValidObjectId(id)){
-      return res.status(400).json({ error: "Post ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    if(!isValidObjectId(id))
+    {
+      return res.status(400).json({ error: "Invalid post id" });
     }
 
     const { userId, reason } = req.body;
-    if(!userId || !reason){
+
+    if(!userId || !reason)
+    {
       return res.status(400).json({ error: "User and reason required" });
     }
-    
-    if(!isValidObjectId(userId)){
-      return res.status(400).json({ error: "User ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+
+    if(!isValidObjectId(userId))
+    {
+      return res.status(400).json({ error: "Invalid user id" });
     }
 
     const db = getDB();
-
     const post = await db.collection("posts").findOne({ _id: new ObjectId(id) });
-    if(!post){
+    if(!post)
+    {
       return res.status(404).json({ error: "Post not found" });
-    }
-
-    const user = await db.collection("users").findOne({ _id: new ObjectId(userId) });
-    if(!user){
-      return res.status(404).json({ error: "User not found" });
     }
 
     const report = {
       userId: new ObjectId(userId),
       reason,
-      createdAt: new Date()
+      createdAt: new Date(),
     };
 
-    const result = await db.collection("posts").updateOne(
+    await db.collection("posts").updateOne(
       { _id: new ObjectId(id) },
-      { $push:{ reports: report } }
+      { $push: { reports: report } }
     );
 
-    if(result.matchedCount === 0){
-      return res.status(404).json({ error: "Post not found" });
-    }
-
     res.json({ success: true, report });
-  } 
-  catch(err){
+  }
+  catch(err)
+  {
     console.error(err);
     res.status(500).json({ error: "Failed to report post" });
   }
 });
 
-//=======================       AlBUM      ======================================
-//=======================       AlBUM      ======================================
-//=======================       AlBUM      ======================================
+//======================== albums =============================
 
-app.get("/api/albums", async(req, res) => {
-  try{
+app.get("/api/albums", async(req, res) =>
+{
+  try
+  {
     const db = getDB();
     const albums = await db.collection("albums").find({}).toArray();
     res.json(albums);
   }
-  catch(err){
+  catch(err)
+  {
     console.error(err);
     res.status(500).json({ error: "Failed to fetch albums" });
   }
 });
 
-app.post("/api/albums", async(req, res) => {
-  try{
+app.post("/api/albums", async(req, res) =>
+{
+  try
+  {
     const { userId, name, description, hashtags } = req.body;
-    if(!userId || !name){
+
+    if(!userId || !name)
+    {
       return res.status(400).json({ error: "User and album name required" });
     }
 
-    if(!isValidObjectId(userId)){
-      return res.status(400).json({ error: "User ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    if(!isValidObjectId(userId))
+    {
+      return res.status(400).json({ error: "Invalid user id" });
     }
 
     const db = getDB();
-
     const user = await db.collection("users").findOne({ _id: new ObjectId(userId) });
-    if(!user){
+    if(!user)
+    {
       return res.status(404).json({ error: "User not found" });
     }
 
@@ -402,24 +608,28 @@ app.post("/api/albums", async(req, res) => {
       description: description || "",
       hashtags: hashtags || [],
       posts: [],
-      createdAt: new Date()
+      createdAt: new Date(),
     };
 
     const result = await db.collection("albums").insertOne(newAlbum);
     res.json({ _id: result.insertedId, ...newAlbum });
   }
-  catch(err){
+  catch(err)
+  {
     console.error(err);
     res.status(500).json({ error: "Failed to create album" });
   }
 });
 
-app.put("/api/albums/:id", async(req, res) => {
-  try{
+app.put("/api/albums/:id", async(req, res) =>
+{
+  try
+  {
     const { id } = req.params;
 
-    if(!isValidObjectId(id)){
-      return res.status(400).json({ error: "Album ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    if(!isValidObjectId(id))
+    {
+      return res.status(400).json({ error: "Invalid album id" });
     }
 
     const { name, description, hashtags } = req.body;
@@ -427,302 +637,322 @@ app.put("/api/albums/:id", async(req, res) => {
 
     const result = await db.collection("albums").updateOne(
       { _id: new ObjectId(id) },
-      { $set:{ name, description, hashtags } }
+      { $set: { name, description, hashtags } }
     );
 
-    if(result.matchedCount === 0){
+    if(result.matchedCount === 0)
+    {
       return res.status(404).json({ error: "Album not found" });
     }
 
     res.json({ success: true, message: "Album updated" });
   }
-  catch(err){
+  catch(err)
+  {
     console.error(err);
     res.status(500).json({ error: "Failed to update album" });
   }
 });
 
-//add post to album
-app.put("/api/albums/:id/posts", async(req, res) => {
-  try{
+app.put("/api/albums/:id/posts", async(req, res) =>
+{
+  try
+  {
     const { id } = req.params;
 
-    if(!isValidObjectId(id)){
-      return res.status(400).json({ error: "Album ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    if(!isValidObjectId(id))
+    {
+      return res.status(400).json({ error: "Invalid album id" });
     }
 
     const { postId } = req.body;
-    if(!postId){
-      return res.status(400).json({ error: "Post ID required" });
+
+    if(!postId || !isValidObjectId(postId))
+    {
+      return res.status(400).json({ error: "Valid post id required" });
     }
 
-    if(!isValidObjectId(postId)){
-      return res.status(400).json({ error: "Post ID is not a valid MongoDB ObjectId(must be 24-character string)" });
-    }
-    
     const db = getDB();
-
     const post = await db.collection("posts").findOne({ _id: new ObjectId(postId) });
-    if(!post){
+    if(!post)
+    {
       return res.status(404).json({ error: "Post not found" });
     }
 
     const result = await db.collection("albums").updateOne(
       { _id: new ObjectId(id) },
-      { $addToSet:{ posts: postId } } // addToSet prevents duplicates
+      { $addToSet: { posts: postId } }
     );
 
-    if(result.matchedCount === 0){
+    if(result.matchedCount === 0)
+    {
       return res.status(404).json({ error: "Album not found" });
     }
 
     res.json({ success: true, message: "Post added to album" });
   }
-  catch(err){
+  catch(err)
+  {
     console.error(err);
     res.status(500).json({ error: "Failed to add post to album" });
   }
 });
 
-//remove post from album
-app.delete("/api/albums/:id/posts/:postId", async(req, res) => {
-  try{
-    const { id , postId } = req.params;
+app.delete("/api/albums/:id/posts/:postId", async(req, res) =>
+{
+  try
+  {
+    const { id, postId } = req.params;
 
-    if(!isValidObjectId(id)){
-      return res.status(400).json({ error: "Album ID is not a valid MongoDB ObjectId(must be 24-character string)" });
-    }
-
-    if(!isValidObjectId(postId)){
-      return res.status(400).json({ error: "Post ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    if(!isValidObjectId(id) || !isValidObjectId(postId))
+    {
+      return res.status(400).json({ error: "Invalid id" });
     }
 
     const db = getDB();
-
-    //check if post exists
-    const post = await db.collection("posts").findOne({ _id: new ObjectId(postId) });
-    if(!post){
-      return res.status(404).json({ error: "Post not found" });
-    }
-
-    //check if post is in album
-    const album = await db.collection("albums").findOne({ _id: new ObjectId(id) });
-    if(!album){
-      return res.status(404).json({ error: "Album not found" });
-    }
-
-    if(!album.posts.includes(postId)){
-      return res.status(400).json({ error: "Post is not in the album" });
-    }
-
     const result = await db.collection("albums").updateOne(
       { _id: new ObjectId(id) },
-      { $pull:{ posts: postId } }
+      { $pull: { posts: postId } }
     );
 
-    if(result.matchedCount === 0){
+    if(result.matchedCount === 0)
+    {
       return res.status(404).json({ error: "Album not found" });
     }
 
     res.json({ success: true, message: "Post removed from album" });
   }
-  catch(err){
+  catch(err)
+  {
     console.error(err);
     res.status(500).json({ error: "Failed to remove post from album" });
   }
 });
 
-//delete album
-app.delete("/api/albums/:id", async(req, res) => {
-  try{
+app.delete("/api/albums/:id", async(req, res) =>
+{
+  try
+  {
     const { id } = req.params;
 
-    if(!isValidObjectId(id)){
-      return res.status(400).json({ error: "Album ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    if(!isValidObjectId(id))
+    {
+      return res.status(400).json({ error: "Invalid album id" });
     }
 
     const db = getDB();
     const result = await db.collection("albums").deleteOne({ _id: new ObjectId(id) });
 
-    if(result.deletedCount === 0){
+    if(result.deletedCount === 0)
+    {
       return res.status(404).json({ error: "Album not found" });
     }
 
     res.json({ success: true, message: "Album deleted" });
   }
-  catch(err){
+  catch(err)
+  {
     console.error(err);
     res.status(500).json({ error: "Failed to delete album" });
   }
 });
 
-//=======================       FRIENDS      =====================================
-//=======================       FRIENDS      =====================================
-//=======================       FRIENDS      =====================================
+//======================== friends ============================
 
-// Send friend request
-app.post("/api/friends/:id/request", async(req, res) => {
-  try{
+app.post("/api/friends/:id/request", async(req, res) =>
+{
+  try
+  {
     const { fromUserId } = req.body;
     const toUserId = req.params.id;
 
-    if(!fromUserId){
-      return res.status(400).json({ error: "Sender user ID required" });
+    if(!fromUserId || !isValidObjectId(fromUserId) || !isValidObjectId(toUserId))
+    {
+      return res.status(400).json({ error: "Invalid user ids" });
     }
 
-    if(!isValidObjectId(fromUserId)){
-      return res.status(400).json({ error: "Sender user ID is not a valid MongoDB ObjectId(must be 24-character string)" });
-    }
-
-    if(!isValidObjectId(toUserId)){
-      return res.status(400).json({ error: "Recipient user ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    if(fromUserId === toUserId)
+    {
+      return res.status(400).json({ error: "Cannot send a friend request to yourself" });
     }
 
     const db = getDB();
     const users = db.collection("users");
 
-    const sender = await users.findOne({ _id: new ObjectId(fromUserId) });
-    if(!sender){
-      return res.status(404).json({ error: "Sender not found" });
-    }
-
     const recipient = await users.findOne({ _id: new ObjectId(toUserId) });
-    if(!recipient){
+    if(!recipient)
+    {
       return res.status(404).json({ error: "Recipient not found" });
     }
 
-    if(fromUserId === toUserId){
-      return res.status(400).json({ error: "Cannot send a friend request to yourself" });
+    //prevent multiple sends (only send once)
+    const alreadyFriends = (recipient.friends || []).some(
+      (f) => f.toString() === fromUserId
+    );
+    if(alreadyFriends)
+    {
+      return res.status(400).json({ error: "You are already friends" });
     }
 
-    const result = await users.updateOne(
+    await users.updateOne(
       { _id: new ObjectId(toUserId) },
-      { $addToSet:{ friendRequests: fromUserId } }
+      { $addToSet: { friendRequests: new ObjectId(fromUserId) } }
     );
 
     res.json({ success: true, message: "Friend request sent" });
-  } 
-  catch(err){
+  }
+  catch(err)
+  {
     console.error(err);
     res.status(500).json({ error: "Failed to send friend request" });
   }
 });
 
-// Accept friend request
-app.put("/api/friends/:id/accept", async(req, res) => {
-  try{
+app.put("/api/friends/:id/accept", async(req, res) =>
+{
+  try
+  {
     const { fromUserId } = req.body;
     const toUserId = req.params.id;
 
-    if(!fromUserId){
-      return res.status(400).json({ error: "Sender user ID required" });
-    }
-
-    if(!isValidObjectId(fromUserId)){
-      return res.status(400).json({ error: "Sender user ID is not a valid MongoDB ObjectId(must be 24-character string)" });
-    }
-
-    if(!isValidObjectId(toUserId)){
-      return res.status(400).json({ error: "Recipient user ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    if(!fromUserId || !isValidObjectId(fromUserId) || !isValidObjectId(toUserId))
+    {
+      return res.status(400).json({ error: "Invalid user ids" });
     }
 
     const db = getDB();
     const users = db.collection("users");
 
-    const sender = await users.findOne({ _id: new ObjectId(fromUserId) });
-    if(!sender){
-      return res.status(404).json({ error: "Sender not found" });
-    }
-
     const recipient = await users.findOne({ _id: new ObjectId(toUserId) });
-    if(!recipient){
+    if(!recipient)
+    {
       return res.status(404).json({ error: "Recipient not found" });
     }
 
-    if(!recipient.friendRequests || !recipient.friendRequests.includes(fromUserId)){
+    const hasRequest = (recipient.friendRequests || []).some(
+      (f) => f.toString() === fromUserId
+    );
+    if(!hasRequest)
+    {
       return res.status(400).json({ error: "Friend request not found" });
     }
 
     await users.updateOne(
       { _id: new ObjectId(toUserId) },
       {
-        $pull:{ friendRequests: fromUserId },
-        $addToSet:{ friends: fromUserId }
+        $pull: { friendRequests: new ObjectId(fromUserId) },
+        $addToSet: { friends: new ObjectId(fromUserId) },
       }
     );
 
     await users.updateOne(
       { _id: new ObjectId(fromUserId) },
-      { $addToSet:{ friends: toUserId } }
+      { $addToSet: { friends: new ObjectId(toUserId) } }
     );
 
     res.json({ success: true, message: "Friend request accepted" });
-  } 
-  catch(err){
+  }
+  catch(err)
+  {
     console.error(err);
     res.status(500).json({ error: "Failed to accept friend request" });
   }
 });
 
-// Unfriend
-app.delete("/api/friends/:id/remove", async(req, res) => {
-  try{
+//decline friend request
+app.delete("/api/friends/:id/decline", async(req, res) =>
+{
+  try
+  {
     const { fromUserId } = req.body;
     const toUserId = req.params.id;
 
-    if(!fromUserId){
-      return res.status(400).json({ error: "User ID required" });
+    if(!fromUserId || !isValidObjectId(fromUserId) || !isValidObjectId(toUserId))
+    {
+      return res.status(400).json({ error: "Invalid user ids" });
     }
 
-    if(!isValidObjectId(fromUserId)){
-      return res.status(400).json({ error: "User ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    const db = getDB();
+    await db.collection("users").updateOne(
+      { _id: new ObjectId(toUserId) },
+      { $pull: { friendRequests: new ObjectId(fromUserId) } }
+    );
+
+    res.json({ success: true, message: "Friend request declined" });
+  }
+  catch(err)
+  {
+    console.error(err);
+    res.status(500).json({ error: "Failed to decline friend request" });
+  }
+});
+
+app.delete("/api/friends/:id/remove", async(req, res) =>
+{
+  try
+  {
+    const { fromUserId } = req.body;
+    const toUserId = req.params.id;
+
+    if(!fromUserId || !isValidObjectId(fromUserId) || !isValidObjectId(toUserId))
+    {
+      return res.status(400).json({ error: "Invalid user ids" });
     }
 
-    if(!isValidObjectId(toUserId)){
-      return res.status(400).json({ error: "Recipient user ID is not a valid MongoDB ObjectId(must be 24-character string)" });
+    if(fromUserId === toUserId)
+    {
+      return res.status(400).json({ error: "Cannot unfriend yourself" });
     }
 
     const db = getDB();
     const users = db.collection("users");
 
-    if(fromUserId === toUserId){
-      return res.status(400).json({ error: "Cannot unfriend yourself" });
-    }
-
-    const sender = await users.findOne({ _id: new ObjectId(fromUserId) });
-    if(!sender){
-      return res.status(404).json({ error: "User not found" });
-    }
-
-    const recipient = await users.findOne({ _id: new ObjectId(toUserId) });
-    if(!recipient){
-      return res.status(404).json({ error: "Recipient not found" });
-    }
-
     await users.updateOne(
       { _id: new ObjectId(toUserId) },
-      { $pull:{ friends: fromUserId } }
+      { $pull: { friends: new ObjectId(fromUserId) } }
     );
 
     await users.updateOne(
       { _id: new ObjectId(fromUserId) },
-      { $pull:{ friends: toUserId } }
+      { $pull: { friends: new ObjectId(toUserId) } }
     );
 
     res.json({ success: true, message: "Unfriended successfully" });
-  } 
-  catch(err){
+  }
+  catch(err)
+  {
     console.error(err);
     res.status(500).json({ error: "Failed to unfriend user" });
   }
 });
 
-async function startServer(){
-    await connectToMongoDB();
+//======================== error handler ======================
 
-    app.listen(3000,() => {
-      console.log("Backend running on port 3000");
-    });
+//catches multer errors and other errors
+app.use((err, req, res, next) =>
+{
+  if(err instanceof multer.MulterError)
+  {
+    const message = err.code === "LIMIT_FILE_SIZE"
+      ? "That image is too big (max 5 MB)."
+      : err.message;
+
+    return res.status(400).json({ error: message });
+  }
+
+  res.status(400).json({ error: err.message });
+});
+
+//======================== start ==============================
+
+async function startServer()
+{
+  await connectToMongoDB();
+
+  app.listen(3000, () =>
+  {
+    console.log("Backend running on port 3000");
+  });
 }
 
 startServer();
