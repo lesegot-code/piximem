@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="140" height="140" viewBox="0 0 140 140">
+  <g fill="none" stroke="currentColor" stroke-width="1" opacity="0.12">
+    <g transform="translate(30,30)">
+      <circle r="18" />
+      <path d="M 0 -18 L 15.6 -9 L 15.6 9 L 0 18 L -15.6 9 L -15.6 -9 Z" />
+    </g>
+    <g transform="translate(100,30)">
+      <circle r="18" />
+      <path d="M 0 -18 L 15.6 -9 L 15.6 9 L 0 18 L -15.6 9 L -15.6 -9 Z" />
+    </g>
+    <g transform="translate(65,100)">
+      <circle r="18" />
+      <path d="M 0 -18 L 15.6 -9 L 15.6 9 L 0 18 L -15.6 9 L -15.6 -9 Z" />
+    </g>
+  </g>
+</svg>
