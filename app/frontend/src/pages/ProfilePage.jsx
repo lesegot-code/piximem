@@ -1,6 +1,6 @@
 // Student Number: 25143230
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import {
   getUser,
@@ -9,12 +9,12 @@ import {
   deleteUser,
   sendFriendRequest,
   acceptFriendRequest,
+  declineFriendRequest,
   unfriend,
 } from "../api.js";
 import Avatar from "../components/Avatar.jsx";
 import EditProfileForm from "../components/EditProfileForm.jsx";
 import AlbumPreview from "../components/AlbumPreview.jsx";
-import { buildImageUrl } from "../api.js";
 
 export default function ProfilePage()
 {
@@ -25,6 +25,7 @@ export default function ProfilePage()
   const isOwnProfile = me?._id === id;
 
   const [profile, setProfile] = useState(null);
+  const [myData, setMyData] = useState(null); // my own full user (friends + requests)
   const [allPosts, setAllPosts] = useState([]);
   const [albums, setAlbums] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -32,7 +33,7 @@ export default function ProfilePage()
   const [tab, setTab] = useState("posts"); // "posts" | "albums"
   const [editing, setEditing] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
-  const [friendsById, setFriendsById] = useState({});
+  const [peopleById, setPeopleById] = useState({});
 
   // load profile + posts + albums
   async function loadProfile()
@@ -42,13 +43,15 @@ export default function ProfilePage()
 
     try
     {
-      const [p, posts, allAlbums] = await Promise.all([
+      const [p, mine, posts, allAlbums] = await Promise.all([
         getUser(id),
+        getUser(me._id),
         getPosts(),
         getAlbums(),
       ]);
 
       setProfile(p);
+      setMyData(mine);
       setAllPosts(posts);
       setAlbums(allAlbums.filter((a) => a.userId.toString() === id));
     }
@@ -66,12 +69,16 @@ export default function ProfilePage()
   {
     let cancelled = false;
 
-    async function loadFriends()
+    //look up names for friends and friend requests
+    async function loadPeople()
     {
-      if(!profile || !(profile.friends || []).length) return;
+      if(!profile) return;
+
+      const ids = [...(profile.friends || []), ...(profile.friendRequests || [])];
+      if(!ids.length) return;
 
       const map = {};
-      for(const fid of profile.friends)
+      for(const fid of ids)
       {
         try
         {
@@ -84,10 +91,10 @@ export default function ProfilePage()
         }
       }
 
-      if(!cancelled) setFriendsById(map);
+      if(!cancelled) setPeopleById(map);
     }
 
-    loadFriends();
+    loadPeople();
     return() => { cancelled = true; };
   }, [profile]);
 
@@ -107,22 +114,24 @@ export default function ProfilePage()
   // friendship status between me and this profile
   const friendship = useMemo(() =>
   {
-    if(!profile || !me) return { status: "none" };
+    if(!profile || !myData) return { status: "none" };
 
-    const amIFriend = (profile.friends || []).some((f) => f.toString() === me._id);
+    const amIFriend = (profile.friends || []).some((f) => f.toString() === myData._id);
     if(amIFriend) return { status: "friends" };
 
-    const iSentRequest = (profile.friendRequests || []).some((f) => f.toString() === me._id);
+    const iSentRequest = (profile.friendRequests || []).some((f) => f.toString() === myData._id);
     if(iSentRequest) return { status: "request-sent" };
 
-    const theySentRequest = (me.friendRequests || []).some((f) => f.toString() === profile._id);
+    //my requests come from the fresh db copy, not the login data
+    const theySentRequest = (myData.friendRequests || []).some((f) => f.toString() === profile._id);
     if(theySentRequest) return { status: "request-received" };
 
     return { status: "none" };
-  }, [profile, me]);
+  }, [profile, myData]);
 
-  // only show friends list if friends or own profile
+  // full profile (bio, posts, albums, friends) only for friends or own profile
   const showFriends = isOwnProfile || friendship.status === "friends";
+  const canSeeFull = showFriends;
 
   // actions
   async function handleAddFriend()
@@ -149,9 +158,6 @@ export default function ProfilePage()
     try
     {
       await acceptFriendRequest(me._id, profile._id);
-      // refresh own user in context
-      const freshMe = await getUser(me._id);
-      localStorage.setItem("piximem_user", JSON.stringify(freshMe));
       await loadProfile();
     }
     catch(err)
@@ -164,24 +170,24 @@ export default function ProfilePage()
     }
   }
 
-  // async function handleUnfriend()
-  // {
-  //   if(!window.confirm("Remove this friend?")) return;
-  //   setActionBusy(true);
-  //   try
-  //   {
-  //     await unfriend(profile._id, me._id);
-  //     await loadProfile();
-  //   }
-  //   catch(err)
-  //   {
-  //     setError(err.message);
-  //   }
-  //   finally
-  //   {
-  //     setActionBusy(false);
-  //   }
-  // }
+  async function handleUnfriend()
+  {
+    if(!window.confirm("Remove this friend?")) return;
+    setActionBusy(true);
+    try
+    {
+      await unfriend(profile._id, me._id);
+      await loadProfile();
+    }
+    catch(err)
+    {
+      setError(err.message);
+    }
+    finally
+    {
+      setActionBusy(false);
+    }
+  }
 
   async function handleDecline()
   {
@@ -246,17 +252,25 @@ export default function ProfilePage()
             <h1 className="font-heading text-2xl text-ink">
               {profile.username}
             </h1>
-            <p className="text-muted text-sm">{profile.email}</p>
-            {profile.bio &&(
-              <p className="text-ink mt-2 text-sm whitespace-pre-wrap">{profile.bio}</p>
+            {/* email is private, only shown to the owner */}
+            {isOwnProfile &&(
+              <p className="text-muted text-sm">{profile.email}</p>
             )}
 
-            {/* stats */}
-            <div className="flex gap-4 mt-3 text-sm">
-              <span><span className="font-semibold text-ink">{userPosts.length}</span> <span className="text-muted">posts</span></span>
-              <span><span className="font-semibold text-ink">{albums.length}</span> <span className="text-muted">albums</span></span>
-              <span><span className="font-semibold text-ink">{(profile.friends || []).length}</span> <span className="text-muted">friends</span></span>
-            </div>
+            {canSeeFull &&(
+              <>
+                {profile.bio &&(
+                  <p className="text-ink mt-2 text-sm whitespace-pre-wrap">{profile.bio}</p>
+                )}
+
+                {/* stats */}
+                <div className="flex gap-4 mt-3 text-sm">
+                  <span><span className="font-semibold text-ink">{userPosts.length}</span> <span className="text-muted">posts</span></span>
+                  <span><span className="font-semibold text-ink">{albums.length}</span> <span className="text-muted">albums</span></span>
+                  <span><span className="font-semibold text-ink">{(profile.friends || []).length}</span> <span className="text-muted">friends</span></span>
+                </div>
+              </>
+            )}
           </div>
 
           {/* action buttons */}
@@ -315,7 +329,17 @@ export default function ProfilePage()
         />
       )}
 
+      {/* non-friends only see name + picture */}
+      {!canSeeFull &&(
+        <div className="card text-center py-8">
+          <p className="text-muted">
+            Add {profile.username} as a friend to see their bio, posts and albums.
+          </p>
+        </div>
+      )}
+
       {/* main grid: content + friends sidebar */}
+      {canSeeFull &&(
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <section className="lg:col-span-2 space-y-4">
           {/* tabs */}
@@ -348,9 +372,9 @@ export default function ProfilePage()
               ? <p className="text-muted text-sm py-6 text-center">No posts yet.</p>
               : <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {userPosts.map((p) =>(
-                    <a
+                    <Link
                       key={p._id}
-                      href={`/post/${p._id}`}
+                      to={`/post/${p._id}`}
                       className="group relative aspect-square bg-bg rounded-lg overflow-hidden border border-border"
                     >
                       {p.imageUrl &&(
@@ -364,7 +388,7 @@ export default function ProfilePage()
                       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition flex items-end p-2 opacity-0 group-hover:opacity-100">
                         <p className="text-white text-xs line-clamp-2">{p.caption}</p>
                       </div>
-                    </a>
+                    </Link>
                   ))}
                 </div>
           )}
@@ -409,18 +433,18 @@ export default function ProfilePage()
               <ul className="space-y-2">
                 {(profile.friends || []).slice(0, 10).map((fid) =>
                 {
-                  const friend = friendsById[fid];
+                  const friend = peopleById[fid];
                   const label = friend?.username || String(fid).slice(-4);
 
                   return(
                     <li key={fid}>
-                      <a
-                        href={`/profile/${fid}`}
+                      <Link
+                        to={`/profile/${fid}`}
                         className="flex items-center gap-2 text-sm text-ink hover:text-pixblue"
                       >
                         <Avatar name={label} avatarUrl={friend?.avatar} size={28} />
                         <span>{label}</span>
-                      </a>
+                      </Link>
                     </li>
                   );
                 })}
@@ -434,20 +458,31 @@ export default function ProfilePage()
                   <p className="text-sm text-muted">No pending requests.</p>
                 )}
                 <ul className="space-y-2 text-sm">
-                  {(profile.friendRequests || []).map((fid) =>(
-                    <li key={fid} className="flex items-center justify-between gap-2">
-                      <span className="text-muted text-xs">Request from…</span>
-                      <a href={`/profile/${fid}`} className="text-pixblue hover:underline">
-                        View
-                      </a>
-                    </li>
-                  ))}
+                  {(profile.friendRequests || []).map((fid) =>
+                  {
+                    const sender = peopleById[fid];
+                    const label = sender?.username || "Someone";
+
+                    return(
+                      <li key={fid} className="flex items-center justify-between gap-2">
+                        <span className="flex items-center gap-2 text-ink">
+                          <Avatar name={label} avatarUrl={sender?.avatar} size={28} />
+                          {label}
+                        </span>
+                        {/* accept / decline happens on their profile */}
+                        <Link to={`/profile/${fid}`} className="text-pixblue hover:underline">
+                          Respond
+                        </Link>
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             )}
           </aside>
         )}
       </div>
+      )}
     </div>
   );
 }

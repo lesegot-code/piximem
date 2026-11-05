@@ -4,13 +4,11 @@ const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) 
 {
-    const [user, setUser] = useState(null);
-
-    //load saved user from localStorage on first mount
-    useEffect(() => {
+    //read the saved user before the first render, so a refresh keeps you logged in
+    const [user, setUser] = useState(() => {
         const saved = localStorage.getItem("piximem_user");
-        if(saved) setUser(JSON.parse(saved));
-    }, []);
+        return saved ? JSON.parse(saved) : null;
+    });
 
     //keeping localStorage in sync, whenever user changes
     useEffect(() => {

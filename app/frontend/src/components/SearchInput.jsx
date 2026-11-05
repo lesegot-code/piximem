@@ -24,7 +24,7 @@ export default function SearchInput({ initialValue = "" })
       <input
         type="text"
         className="input pl-9"
-        placeholder="Search users, posts, albums, #hashtags…"
+        placeholder="Search posts or #hashtags…"
         value={value}
         onChange={(e) => setValue(e.target.value)}
         aria-label="Search"

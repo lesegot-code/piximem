@@ -91,7 +91,11 @@ export default function Comments({ post, onUpdated })
 
       {/* add form */}
       <form onSubmit={handleSubmit} className="space-y-2 pt-2">
+        <label htmlFor="new-comment" className="block text-sm text-muted">
+          Add a comment
+        </label>
         <textarea
+          id="new-comment"
           className="input resize-none"
           rows={2}
           value={text}

@@ -1,5 +1,4 @@
 // Student Number: u25143230
-import { Link } from "react-router-dom";
 import { buildImageUrl } from "../api.js";
 
 export default function AlbumPreview({ album, postImages = [] })
@@ -8,11 +7,7 @@ export default function AlbumPreview({ album, postImages = [] })
   const hasCovers = covers.length > 0;
 
   return(
-    <Link
-      to={`/home?album=${album._id}`}
-      className="card p-0 overflow-hidden block group"
-      aria-label={`Open album ${album.name}`}
-    >
+    <article className="card p-0 overflow-hidden block group">
       {/* stacked cover */}
       <div className="relative aspect-square bg-bg overflow-hidden">
         {hasCovers && covers.map((src, i) =>
@@ -56,6 +51,6 @@ export default function AlbumPreview({ album, postImages = [] })
           </div>
         )}
       </div>
-    </Link>
+    </article>
   );
 }
