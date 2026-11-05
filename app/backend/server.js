@@ -5,7 +5,7 @@ import multer from "multer";
 import path from "node:path";
 import fs from "node:fs";
 import { ObjectId } from "mongodb";
-import { connectToMongoDB, getDB } from "./db.js";
+import { connectToMongoDB, getDB, isConnected } from "./db.js";
 
 const app = express();
 const UPLOAD_DIR = path.join(import.meta.dirname, "uploads");
@@ -19,6 +19,16 @@ app.use(cors());
 app.use(express.json());
 
 app.use("/uploads", express.static(UPLOAD_DIR));
+
+//api calls wait for the database connection
+app.use("/api", (req, res, next) =>
+{
+  if(!isConnected())
+  {
+    return res.status(503).json({ error: "Server is still connecting to the database. Please try again in a moment." });
+  }
+  next();
+});
 
 //======================== multer =============================
 
@@ -253,12 +263,21 @@ app.delete("/api/users/:id", async(req, res) =>
     }
 
     const db = getDB();
-    const result = await db.collection("users").deleteOne({ _id: new ObjectId(id) });
+    const userId = new ObjectId(id);
+    const result = await db.collection("users").deleteOne({ _id: userId });
 
     if(result.deletedCount === 0)
     {
       return res.status(404).json({ error: "User not found" });
     }
+
+    //remove the user's posts, albums and friend links
+    await db.collection("posts").deleteMany({ userId });
+    await db.collection("albums").deleteMany({ userId });
+    await db.collection("users").updateMany(
+      {},
+      { $pull: { friends: userId, friendRequests: userId } }
+    );
 
     res.json({ success: true, message: "User deleted" });
   }
@@ -438,12 +457,17 @@ app.delete("/api/posts/:id", async(req, res) =>
     }
 
     const db = getDB();
-    const result = await db.collection("posts").deleteOne({ _id: new ObjectId(id) });
+    const postId = new ObjectId(id);
+    //comments live inside the post, so they are deleted with it
+    const result = await db.collection("posts").deleteOne({ _id: postId });
 
     if(result.deletedCount === 0)
     {
       return res.status(404).json({ error: "Post not found" });
     }
+
+    //take the post out of any albums
+    await db.collection("albums").updateMany({}, { $pull: { posts: postId } });
 
     res.json({ success: true, message: "Post deleted" });
   }
@@ -540,6 +564,21 @@ app.post("/api/posts/:id/report", async(req, res) =>
     if(!post)
     {
       return res.status(404).json({ error: "Post not found" });
+    }
+
+    //owners can't report their own post
+    if(post.userId.toString() === userId)
+    {
+      return res.status(400).json({ error: "You cannot report your own post" });
+    }
+
+    //one report per user per post
+    const alreadyReported = (post.reports || []).some(
+      (r) => r.userId.toString() === userId
+    );
+    if(alreadyReported)
+    {
+      return res.status(400).json({ error: "You have already reported this post" });
     }
 
     const report = {
@@ -681,7 +720,7 @@ app.put("/api/albums/:id/posts", async(req, res) =>
 
     const result = await db.collection("albums").updateOne(
       { _id: new ObjectId(id) },
-      { $addToSet: { posts: postId } }
+      { $addToSet: { posts: new ObjectId(postId) } }
     );
 
     if(result.matchedCount === 0)
@@ -712,7 +751,7 @@ app.delete("/api/albums/:id/posts/:postId", async(req, res) =>
     const db = getDB();
     const result = await db.collection("albums").updateOne(
       { _id: new ObjectId(id) },
-      { $pull: { posts: postId } }
+      { $pull: { posts: new ObjectId(postId) } }
     );
 
     if(result.matchedCount === 0)
@@ -945,10 +984,8 @@ app.use((err, req, res, next) =>
 
 //======================== start ==============================
 
-async function startServer()
+function copySeedImages()
 {
-  await connectToMongoDB();
-
   const SEED_DIR = path.join(import.meta.dirname, "seed-images");
 
   if(fs.existsSync(SEED_DIR))
@@ -965,11 +1002,34 @@ async function startServer()
       }
     }
   }
+}
 
+//keeps trying until MongoDB connects
+async function connectWithRetry()
+{
+  try
+  {
+    await connectToMongoDB();
+  }
+  catch
+  {
+    console.log("Retrying MongoDB connection in 5 seconds...");
+    console.log("Check MONGODB_URI in backend/.env and Atlas Network Access (allow your IP).");
+    setTimeout(connectWithRetry, 5000);
+  }
+}
+
+function startServer()
+{
+  copySeedImages();
+
+  //listen straight away so the frontend always gets a reply
   app.listen(3000, () =>
   {
     console.log("Backend running on port 3000");
   });
+
+  connectWithRetry();
 }
 
 startServer();

@@ -94,10 +94,7 @@ export default function PostPreview({ post, author, previewComments = 2 })
 
       {/* footer stats */}
       <footer className="mt-3 flex items-center justify-between text-sm text-muted border-t border-border pt-3">
-        <div className="flex items-center gap-4">
-          <span>{post.comments?.length || 0} comments</span>
-          <span>{post.likes || 0} likes</span>
-        </div>
+        <span>{post.comments?.length || 0} comments</span>
         <Link to={`/post/${post._id}`} className="text-pixblue font-medium hover:underline">
           View post
         </Link>

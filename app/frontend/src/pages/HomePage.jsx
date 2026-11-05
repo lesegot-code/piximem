@@ -1,6 +1,6 @@
 // Student Number: u25143230
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import { getPosts, getAllUsers, getUser } from "../api.js";
 import PostPreview from "../components/PostPreview.jsx";
@@ -82,8 +82,8 @@ export default function HomePage()
   {
     let list = [...posts];
 
-    // local feed = my friends + me
-    if(feedType === "local" && me)
+    // local feed = my friends + me (a search looks through everyone's posts)
+    if(feedType === "local" && me && !q)
     {
       const myFriends = (me.friends || []).map((f) => f.toString());
       const allowed = new Set([user._id, ...myFriends]);
@@ -156,7 +156,8 @@ export default function HomePage()
       <section className="lg:col-span-2 space-y-4">
         {/* search + filters */}
         <div className="space-y-3">
-          <SearchInput initialValue={q} />
+          {/* key resets the box when the query changes (e.g. hashtag click) */}
+          <SearchInput key={q} initialValue={q} />
 
           <div className="flex flex-wrap items-center gap-2">
             {/* feed switch */}
@@ -208,7 +209,7 @@ export default function HomePage()
 
           {q &&(
             <p className="text-sm text-muted">
-              Showing results for <span className="text-ink font-medium">"{q}"</span>
+              Showing results from all users for <span className="text-ink font-medium">"{q}"</span>
             </p>
           )}
         </div>
@@ -258,9 +259,9 @@ export default function HomePage()
           <button onClick={openCompose} className="btn-primary w-full mb-2">
             Share a Memory
           </button>
-          <a href={`/profile/${user._id}`} className="btn-secondary w-full block text-center">
+          <Link to={`/profile/${user._id}`} className="btn-secondary w-full block text-center">
             View my profile
-          </a>
+          </Link>
         </div>
 
         <div className="card">
@@ -275,12 +276,12 @@ export default function HomePage()
               .slice(0, 5)
               .map((u) =>(
                 <li key={u._id}>
-                  <a href={`/profile/${u._id}`} className="flex items-center gap-2 text-sm hover:text-pixblue">
+                  <Link to={`/profile/${u._id}`} className="flex items-center gap-2 text-sm hover:text-pixblue">
                     <span className="w-8 h-8 rounded-full bg-pixblue/20 text-pixblue flex items-center justify-center font-semibold">
                       {u.username?.[0]?.toUpperCase() || "?"}
                     </span>
-                    <span>{u.username || u.email}</span>
-                  </a>
+                    <span>{u.username}</span>
+                  </Link>
                 </li>
               ))}
           </ul>

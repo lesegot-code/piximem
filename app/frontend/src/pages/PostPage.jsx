@@ -87,6 +87,8 @@ export default function PostPage()
   const isOwner = me._id === post.userId.toString();
   const reportCount = (post.reports || []).length;
   const hidden = reportCount > 2;
+  // each user can only report a post once
+  const alreadyReported = (post.reports || []).some((r) => r.userId.toString() === me._id);
 
   const imageSrc = post.imageUrl || buildImageUrl(post.image);
 
@@ -113,9 +115,15 @@ export default function PostPage()
             </>
           )}
 
-          {!isOwner &&(
+          {!isOwner && !alreadyReported &&(
             <button onClick={() => setReporting(true)} className="btn-secondary text-sm">
               Report
+            </button>
+          )}
+
+          {!isOwner && alreadyReported &&(
+            <button disabled className="btn-secondary text-sm opacity-50 cursor-not-allowed">
+              Reported
             </button>
           )}
         </div>
@@ -194,13 +202,9 @@ export default function PostPage()
                 <p className="text-xs text-muted mb-1">In album{albums.length > 1 ? "s" : ""}:</p>
                 <div className="flex flex-wrap gap-2">
                   {albums.map((a) =>(
-                    <Link
-                      key={a._id}
-                      to={`/home?album=${a._id}`}
-                      className="hashtag-pill text-xs"
-                    >
+                    <span key={a._id} className="hashtag-pill text-xs">
                       {a.name}
-                    </Link>
+                    </span>
                   ))}
                 </div>
               </div>
