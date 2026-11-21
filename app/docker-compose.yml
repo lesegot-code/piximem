@@ -17,6 +17,9 @@ services:
     container_name: piximem-frontend
     ports:
       - "5173:5173"
+    environment:
+      #vite forwards /api and /uploads to the backend container
+      - API_TARGET=http://backend:3000
     volumes:
       - ./frontend:/app
       - /app/node_modules

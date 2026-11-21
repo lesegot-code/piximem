@@ -1,0 +1,23 @@
+# Render Blueprint: one free web service that runs app/Dockerfile.
+# It deploys main only after every GitHub Actions check has passed.
+services:
+  - type: web
+    name: pixel-memory
+    runtime: docker
+    plan: free
+    region: frankfurt
+    branch: main
+    dockerContext: ./app
+    dockerfilePath: ./app/Dockerfile
+    healthCheckPath: /api/health
+    autoDeployTrigger: checksPass
+    envVars:
+      # your Atlas connection string (Render asks for it when you create the Blueprint)
+      - key: MONGODB_URI
+        sync: false
+      # a separate database for the live site, so local testing never touches it
+      - key: MONGODB_DB
+        value: pixelmemory
+      # cloudinary://API_KEY:API_SECRET@CLOUD_NAME, keeps uploaded photos when the server restarts
+      - key: CLOUDINARY_URL
+        sync: false

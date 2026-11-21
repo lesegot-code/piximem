@@ -1,0 +1,12 @@
+**/node_modules
+**/npm-debug.log
+**/.env
+**/.env.*
+!**/.env.example
+**/.git
+frontend/dist
+frontend/test-results
+frontend/playwright-report
+backend/uploads/*
+!backend/uploads/.gitkeep
+database

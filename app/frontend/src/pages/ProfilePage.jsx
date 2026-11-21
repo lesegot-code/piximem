@@ -1,487 +1,458 @@
-// Student Number: 25143230
-import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+// Student Number: u25143230
+import { useEffect, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
+import { useUi } from "../context/UiContext.jsx";
 import {
-  getUser,
-  getPosts,
-  getAlbums,
-  deleteUser,
-  sendFriendRequest,
-  acceptFriendRequest,
-  declineFriendRequest,
-  unfriend,
+  getProfile, deleteUser, sendFriendRequest, acceptFriendRequest, declineFriendRequest,
+  cancelFriendRequest, unfriend, toggleFavourite, requestVerification,
 } from "../api.js";
 import Avatar from "../components/Avatar.jsx";
+import UserName, { VerifiedBadge } from "../components/UserName.jsx";
+import Modal from "../components/Modal.jsx";
 import EditProfileForm from "../components/EditProfileForm.jsx";
-import AlbumPreview from "../components/AlbumPreview.jsx";
+import AlbumForm from "../components/AlbumForm.jsx";
+import AlbumCard from "../components/AlbumCard.jsx";
+import PhotoGrid from "../components/PhotoGrid.jsx";
+import { plural } from "../utils/format.js";
+
+const STATUS_TEXT = {
+  friends: "Friends",
+  "request-sent": "Friend request sent",
+  "request-received": "Wants to be your friend",
+  none: "Not friends yet",
+};
+
+function PersonRow({ person, children })
+{
+  return(
+    <li className="flex items-center gap-2">
+      <Link to={`/profile/${person._id}`} aria-label={`${person.username}'s profile`}>
+        <Avatar user={person} size="sm" />
+      </Link>
+      <div className="flex-1 min-w-0 text-sm">
+        <UserName user={person} />
+        <p className="text-xs text-muted truncate">@{person.username}</p>
+      </div>
+      {children}
+    </li>
+  );
+}
+
+//what you need for the verified tick, and the button to ask for it
+function VerificationCard({ data, user, onRequested })
+{
+  const { toast } = useUi();
+  const [busy, setBusy] = useState(false);
+
+  if(user.isAdmin) return null;
+
+  if(user.verified)
+  {
+    return(
+      <section className="card flex items-center gap-3 text-sm">
+        <VerifiedBadge className="w-6 h-6 text-xs" />
+        <p className="text-ink">Your account is verified.</p>
+      </section>
+    );
+  }
+
+  const { progress } = data;
+  const pending = user.verification?.status === "pending";
+  const denied = user.verification?.status === "denied";
+
+  async function ask()
+  {
+    setBusy(true);
+    try
+    {
+      await requestVerification();
+      toast("Verification requested. An admin will review it.");
+      onRequested();
+    }
+    catch(err)
+    {
+      toast(err.message, "error");
+      setBusy(false);
+    }
+  }
+
+  const steps = [
+    [`Account older than ${progress.rules.days} days`, progress.days >= progress.rules.days, `${progress.days} days`],
+    [`${progress.rules.posts} or more posts`, progress.posts >= progress.rules.posts, plural(progress.posts, "post")],
+    [`${progress.rules.comments} or more comments`, progress.comments >= progress.rules.comments, plural(progress.comments, "comment")],
+  ];
+
+  return(
+    <section className="card space-y-3" aria-labelledby="verify-heading">
+      <h2 id="verify-heading" className="font-heading text-ink">Get verified</h2>
+      <ul className="space-y-1.5 text-sm">
+        {steps.map(([label, done, value]) =>(
+          <li key={label} className="flex items-center gap-2">
+            <span className={done ? "text-success" : "text-muted"} aria-hidden="true">{done ? "✓" : "○"}</span>
+            <span className={done ? "text-ink" : "text-muted"}>{label}</span>
+            <span className="ml-auto text-xs text-muted">{value}</span>
+          </li>
+        ))}
+      </ul>
+      {pending
+        ? <p className="notice-box">Request sent. An admin will review it soon.</p>
+        : (
+          <>
+            {denied && <p className="text-xs text-muted">Your last request wasn't approved. You can ask again.</p>}
+            <button type="button" className="btn-primary btn-sm w-full" disabled={!progress.eligible || busy} onClick={ask}>
+              {busy ? "Sending…" : progress.eligible ? "Request verification" : "Not eligible yet"}
+            </button>
+          </>
+        )}
+    </section>
+  );
+}
 
 export default function ProfilePage()
 {
   const { id } = useParams();
-  const { user: me, logoutUser } = useAuth();
+  const [params, setParams] = useSearchParams();
+  const { user: me, refreshUser, logoutUser } = useAuth();
+  const { toast, confirm, dataVersion } = useUi();
   const navigate = useNavigate();
 
-  const isOwnProfile = me?._id === id;
-
-  const [profile, setProfile] = useState(null);
-  const [myData, setMyData] = useState(null); // my own full user (friends + requests)
-  const [allPosts, setAllPosts] = useState([]);
-  const [albums, setAlbums] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState(null);
   const [error, setError] = useState("");
-  const [tab, setTab] = useState("posts"); // "posts" | "albums"
-  const [editing, setEditing] = useState(false);
-  const [actionBusy, setActionBusy] = useState(false);
-  const [peopleById, setPeopleById] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [modal, setModal] = useState(null); // "edit" | "album"
+  const [reload, setReload] = useState(0);
 
-  // load profile + posts + albums
-  async function loadProfile()
-  {
-    setLoading(true);
-    setError("");
-
-    try
-    {
-      const [p, mine, posts, allAlbums] = await Promise.all([
-        getUser(id),
-        getUser(me._id),
-        getPosts(),
-        getAlbums(),
-      ]);
-
-      setProfile(p);
-      setMyData(mine);
-      setAllPosts(posts);
-      setAlbums(allAlbums.filter((a) => a.userId.toString() === id));
-    }
-    catch(err)
-    {
-      setError(err.message);
-    }
-    finally
-    {
-      setLoading(false);
-    }
-  }
+  const tab = params.get("tab") === "albums" ? "albums" : "posts";
 
   useEffect(() =>
   {
     let cancelled = false;
-
-    //look up names for friends and friend requests
-    async function loadPeople()
-    {
-      if(!profile) return;
-
-      const ids = [...(profile.friends || []), ...(profile.friendRequests || [])];
-      if(!ids.length) return;
-
-      const map = {};
-      for(const fid of ids)
-      {
-        try
-        {
-          const u = await getUser(fid);
-          map[fid] = u;
-        }
-        catch
-        {
-          //will fall back to id slice
-        }
-      }
-
-      if(!cancelled) setPeopleById(map);
-    }
-
-    loadPeople();
+    getProfile(id)
+      .then((d) => { if(!cancelled) { setData(d); setError(""); } })
+      .catch((err) => { if(!cancelled) { setError(err.message); setData(null); } });
     return() => { cancelled = true; };
-  }, [profile]);
+  }, [id, reload, dataVersion]);
 
-  useEffect(() =>
+  const refresh = () => setReload((n) => n + 1);
+
+  //runs a friend action, then reloads the profile
+  async function act(fn, message)
   {
-    loadProfile();
-  }, [id]);
-
-  // posts owned by this user, newest first
-  const userPosts = useMemo(() =>
-  {
-    return allPosts
-      .filter((p) => p.userId.toString() === id)
-      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  }, [allPosts, id]);
-
-  // friendship status between me and this profile
-  const friendship = useMemo(() =>
-  {
-    if(!profile || !myData) return { status: "none" };
-
-    const amIFriend = (profile.friends || []).some((f) => f.toString() === myData._id);
-    if(amIFriend) return { status: "friends" };
-
-    const iSentRequest = (profile.friendRequests || []).some((f) => f.toString() === myData._id);
-    if(iSentRequest) return { status: "request-sent" };
-
-    //my requests come from the fresh db copy, not the login data
-    const theySentRequest = (myData.friendRequests || []).some((f) => f.toString() === profile._id);
-    if(theySentRequest) return { status: "request-received" };
-
-    return { status: "none" };
-  }, [profile, myData]);
-
-  // full profile (bio, posts, albums, friends) only for friends or own profile
-  const showFriends = isOwnProfile || friendship.status === "friends";
-  const canSeeFull = showFriends;
-
-  // actions
-  async function handleAddFriend()
-  {
-    setActionBusy(true);
+    setBusy(true);
     try
     {
-      await sendFriendRequest(profile._id, me._id);
-      await loadProfile();
+      await fn(id);
+      await refreshUser();
+      refresh();
+      if(message) toast(message);
     }
     catch(err)
     {
-      setError(err.message);
+      toast(err.message, "error");
     }
     finally
     {
-      setActionBusy(false);
-    }
-  }
-
-  async function handleAccept()
-  {
-    setActionBusy(true);
-    try
-    {
-      await acceptFriendRequest(me._id, profile._id);
-      await loadProfile();
-    }
-    catch(err)
-    {
-      setError(err.message);
-    }
-    finally
-    {
-      setActionBusy(false);
+      setBusy(false);
     }
   }
 
   async function handleUnfriend()
   {
-    if(!window.confirm("Remove this friend?")) return;
-    setActionBusy(true);
+    const ok = await confirm({
+      title: `Unfriend ${data.user.username}?`,
+      message: "You'll stop seeing each other's posts in your friends feed and lose access to their full profile.",
+      confirmLabel: "Unfriend",
+      danger: true,
+    });
+    if(ok) act(unfriend, `You are no longer friends with ${data.user.username}`);
+  }
+
+  async function handleFavourite()
+  {
     try
     {
-      await unfriend(profile._id, me._id);
-      await loadProfile();
+      const { isFavourite } = await toggleFavourite(id);
+      await refreshUser();
+      refresh();
+      toast(isFavourite ? `${data.user.username}'s posts will show first in your feed` : "Removed from favourites");
     }
     catch(err)
     {
-      setError(err.message);
-    }
-    finally
-    {
-      setActionBusy(false);
+      toast(err.message, "error");
     }
   }
 
-  async function handleDecline()
+  async function handleDeleteAccount()
   {
-    setActionBusy(true);
-    try
-    {
-      await declineFriendRequest(me._id, profile._id);
-      await loadProfile();
-    }
-    catch(err)
-    {
-      setError(err.message);
-    }
-    finally
-    {
-      setActionBusy(false);
-    }
-  }
+    const ok = await confirm({
+      title: "Delete your account?",
+      message: "Your profile, posts, albums and comments will be deleted forever. This can't be undone.",
+      confirmLabel: "Delete my account",
+      danger: true,
+    });
+    if(!ok) return;
 
-  async function handleDeleteProfile()
-  {
-    if(!window.confirm("Delete your account permanently? This cannot be undone.")) return;
     try
     {
       await deleteUser(me._id);
-      logoutUser();
+      await logoutUser();
+      toast("Your account was deleted.");
       navigate("/");
     }
     catch(err)
     {
-      setError(err.message);
+      toast(err.message, "error");
     }
   }
 
-  // ----- render -----
+  async function respond(person, accept)
+  {
+    try
+    {
+      await (accept ? acceptFriendRequest : declineFriendRequest)(person._id);
+      await refreshUser();
+      refresh();
+      toast(accept ? `You and ${person.username} are now friends` : "Request declined");
+    }
+    catch(err)
+    {
+      toast(err.message, "error");
+    }
+  }
 
-  if(loading) return <p className="text-muted text-center py-10">Loading profile…</p>;
-  if(error) return(
-    <p className="text-red-400 text-sm bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 max-w-xl mx-auto">
-      {error}
-    </p>
-  );
-  if(!profile) return <p className="text-muted text-center py-10">Profile not found.</p>;
+  function setTab(next)
+  {
+    setParams(next === "posts" ? {} : { tab: next }, { replace: true });
+  }
+
+  if(error)
+  {
+    return(
+      <div className="card text-center py-12 max-w-lg mx-auto space-y-3">
+        <p className="text-ink font-medium">{error}</p>
+        <Link to="/home" className="btn-secondary btn-sm">Back to the feed</Link>
+      </div>
+    );
+  }
+
+  if(!data || data.user._id !== id) return <div className="skeleton h-72" aria-label="Loading profile" />;
+
+  const { user, friendship, canSeeFull } = data;
+  const isSelf = friendship === "self";
+  const posts = data.posts || [];
+  const albums = data.albums || [];
 
   return(
     <div className="space-y-6">
-      {/* banner */}
-      <div className="h-32 md:h-44 rounded-card bg-pix-banner" />
+      {/* banner and header are grouped so the card can overlap the banner */}
+      <div>
+      <div className="h-28 md:h-40 rounded-card bg-pix-banner" aria-hidden="true" />
 
-      {/* header card (avatar + info + action button) */}
-      <div className="card -mt-16 mx-4 relative">
+      <section className="card -mt-12 md:-mt-16 mx-2 md:mx-6 relative">
         <div className="flex flex-col md:flex-row md:items-end gap-4">
-          <div className="mt-[-3rem] md:mt-0">
-            <Avatar
-              name={profile.username}
-              avatarUrl={profile.avatar}
-              size={96}
-            />
-          </div>
+          <Avatar user={user} size="2xl" className="-mt-14 md:-mt-16 ring-4 ring-[var(--surface)]" />
 
-          <div className="flex-1">
-            <h1 className="font-heading text-2xl text-ink">
-              {profile.username}
+          <div className="flex-1 min-w-0">
+            <h1 className="font-heading text-2xl text-ink flex items-center gap-2 flex-wrap">
+              {user.name || user.username}
+              {user.verified && <VerifiedBadge className="w-5 h-5 text-xs" />}
+              {user.isAdmin && <span className="text-xs font-body font-medium text-pixamber border border-pixamber/40 rounded-full px-2 py-0.5">Moderator</span>}
             </h1>
-            {/* email is private, only shown to the owner */}
-            {isOwnProfile &&(
-              <p className="text-muted text-sm">{profile.email}</p>
-            )}
+            <p className="text-muted text-sm">
+              @{user.username}{user.pronouns && ` · ${user.pronouns}`}
+            </p>
 
             {canSeeFull &&(
               <>
-                {profile.bio &&(
-                  <p className="text-ink mt-2 text-sm whitespace-pre-wrap">{profile.bio}</p>
-                )}
-
-                {/* stats */}
+                {user.bio && <p className="text-ink mt-2 text-sm whitespace-pre-wrap">{user.bio}</p>}
+                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-sm text-muted">
+                  {user.location && <span>📍 {user.location}</span>}
+                  {user.website &&(
+                    <a href={user.website} target="_blank" rel="noopener noreferrer" className="link truncate max-w-[16rem]">
+                      🔗 {user.website.replace(/^https?:\/\//, "")}
+                    </a>
+                  )}
+                  {user.createdAt && <span>Joined {new Date(user.createdAt).toLocaleDateString(undefined, { month: "long", year: "numeric" })}</span>}
+                </div>
                 <div className="flex gap-4 mt-3 text-sm">
-                  <span><span className="font-semibold text-ink">{userPosts.length}</span> <span className="text-muted">posts</span></span>
-                  <span><span className="font-semibold text-ink">{albums.length}</span> <span className="text-muted">albums</span></span>
-                  <span><span className="font-semibold text-ink">{(profile.friends || []).length}</span> <span className="text-muted">friends</span></span>
+                  <span><strong className="text-ink">{posts.length}</strong> <span className="text-muted">posts</span></span>
+                  <span><strong className="text-ink">{albums.length}</strong> <span className="text-muted">albums</span></span>
+                  <span><strong className="text-ink">{data.friends.length}</strong> <span className="text-muted">friends</span></span>
                 </div>
               </>
             )}
+            {isSelf && <p className="text-xs text-muted mt-2">Only you can see your email: {user.email}</p>}
           </div>
 
-          {/* action buttons */}
-          <div className="flex gap-2 flex-wrap">
-            {isOwnProfile &&(
+          {/* actions depend on how you know this person */}
+          <div className="flex gap-2 flex-wrap items-center">
+            {isSelf &&(
               <>
-                <button onClick={() => setEditing((v) => !v)} className="btn-secondary">
-                  {editing ? "Close editor" : "Edit profile"}
-                </button>
-                <button onClick={handleDeleteProfile} className="btn-secondary text-red-400 border-red-500/30 hover:border-red-500">
-                  Delete account
-                </button>
+                <button type="button" onClick={() => setModal("edit")} className="btn-secondary btn-sm">Edit profile</button>
+                <button type="button" onClick={handleDeleteAccount} className="btn-danger btn-sm">Delete account</button>
               </>
             )}
 
-            {!isOwnProfile && friendship.status === "none" &&(
-              <button onClick={handleAddFriend} disabled={actionBusy} className="btn-primary">
+            {!isSelf &&(
+              <span className={`text-xs font-medium rounded-full px-3 py-1 border ${
+                friendship === "friends" ? "text-success border-emerald-500/40" : "text-muted border-border"
+              }`}>
+                {friendship === "friends" ? "✓ " : ""}{STATUS_TEXT[friendship]}
+              </span>
+            )}
+
+            {friendship === "none" &&(
+              <button type="button" onClick={() => act(sendFriendRequest, `Friend request sent to ${user.username}`)} disabled={busy} className="btn-primary btn-sm">
                 Add friend
               </button>
             )}
 
-            {!isOwnProfile && friendship.status === "request-sent" &&(
-              <span className="text-sm text-muted">Friend request sent</span>
+            {friendship === "request-sent" &&(
+              <button type="button" onClick={() => act(cancelFriendRequest, "Friend request cancelled")} disabled={busy} className="btn-secondary btn-sm">
+                Cancel request
+              </button>
             )}
 
-            {!isOwnProfile && friendship.status === "request-received" &&(
+            {friendship === "request-received" &&(
               <>
-                <button onClick={handleAccept} disabled={actionBusy} className="btn-primary">
-                  Accept request
+                <button type="button" onClick={() => act(acceptFriendRequest, `You and ${user.username} are now friends`)} disabled={busy} className="btn-primary btn-sm">
+                  Accept
                 </button>
-                <button onClick={handleDecline} disabled={actionBusy} className="btn-secondary">
+                <button type="button" onClick={() => act(declineFriendRequest, "Request declined")} disabled={busy} className="btn-secondary btn-sm">
                   Decline
                 </button>
               </>
             )}
 
-            {!isOwnProfile && friendship.status === "friends" &&(
-              <button onClick={handleUnfriend} disabled={actionBusy} className="btn-secondary">
-                Unfriend
-              </button>
+            {friendship === "friends" &&(
+              <>
+                <button
+                  type="button"
+                  onClick={handleFavourite}
+                  aria-pressed={data.isFavourite}
+                  className={`btn-secondary btn-sm ${data.isFavourite ? "text-pixamber border-pixamber/50" : ""}`}
+                  title="Favourite friends show first in your feed"
+                >
+                  {data.isFavourite ? "★ Favourite" : "☆ Add to favourites"}
+                </button>
+                <button type="button" onClick={handleUnfriend} disabled={busy} className="btn-secondary btn-sm">
+                  Unfriend
+                </button>
+              </>
             )}
           </div>
         </div>
+      </section>
       </div>
 
-      {/* edit form */}
-      {editing &&(
-        <EditProfileForm
-          user={profile}
-          onSaved={async () =>
-          {
-            setEditing(false);
-            await loadProfile();
-          }}
-          onCancel={() => setEditing(false)}
-        />
-      )}
-
-      {/* non-friends only see name + picture */}
       {!canSeeFull &&(
-        <div className="card text-center py-8">
-          <p className="text-muted">
-            Add {profile.username} as a friend to see their bio, posts and albums.
+        <div className="card text-center py-10 space-y-1">
+          <p className="text-ink font-medium">This profile is only visible to friends</p>
+          <p className="text-sm text-muted">
+            {friendship === "request-sent"
+              ? `Once ${user.username} accepts your request you'll see their bio, posts, albums and friends.`
+              : `Add ${user.username} as a friend to see their bio, posts, albums and friends.`}
           </p>
         </div>
       )}
 
-      {/* main grid: content + friends sidebar */}
       {canSeeFull &&(
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <section className="lg:col-span-2 space-y-4">
-          {/* tabs */}
-          <div className="flex border-b border-border">
-            <button
-              onClick={() => setTab("posts")}
-              className={`px-4 py-2 text-sm font-medium transition ${
-                tab === "posts"
-                  ? "text-pixblue border-b-2 border-pixblue"
-                  : "text-muted hover:text-ink"
-              }`}
-            >
-              Posts ({userPosts.length})
-            </button>
-            <button
-              onClick={() => setTab("albums")}
-              className={`px-4 py-2 text-sm font-medium transition ${
-                tab === "albums"
-                  ? "text-pixblue border-b-2 border-pixblue"
-                  : "text-muted hover:text-ink"
-              }`}
-            >
-              Albums ({albums.length})
-            </button>
-          </div>
-
-          {/* posts grid */}
-          {tab === "posts" &&(
-            userPosts.length === 0
-              ? <p className="text-muted text-sm py-6 text-center">No posts yet.</p>
-              : <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {userPosts.map((p) =>(
-                    <Link
-                      key={p._id}
-                      to={`/post/${p._id}`}
-                      className="group relative aspect-square bg-bg rounded-lg overflow-hidden border border-border"
-                    >
-                      {p.imageUrl &&(
-                        <img
-                          src={p.imageUrl}
-                          alt={p.caption?.slice(0, 40) || "Post"}
-                          className="w-full h-full object-cover transition group-hover:scale-105"
-                          loading="lazy"
-                        />
-                      )}
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition flex items-end p-2 opacity-0 group-hover:opacity-100">
-                        <p className="text-white text-xs line-clamp-2">{p.caption}</p>
-                      </div>
-                    </Link>
-                  ))}
-                </div>
-          )}
-
-          {/* albums grid */}
-          {tab === "albums" &&(
-            albums.length === 0
-              ? <p className="text-muted text-sm py-6 text-center">No albums yet.</p>
-              : <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {albums.map((album) =>
-                  {
-                    const coverImages = (album.posts || [])
-                      .map((pid) =>
-                      {
-                        const found = allPosts.find((p) => p._id.toString() === pid.toString());
-                        return found ? (found.image || found.imageUrl) : null;
-                      })
-                      .filter(Boolean);
-
-                    return(
-                      <AlbumPreview
-                        key={album._id}
-                        album={album}
-                        postImages={coverImages}
-                      />
-                    );
-                  })}
-                </div>
-          )}
-        </section>
-
-        {/* friends sidebar */}
-        {showFriends &&(
-          <aside className="space-y-4">
-            <div className="card">
-              <h3 className="font-heading text-ink mb-3">
-                Friends ({profile.friends?.length || 0})
-              </h3>
-              {(profile.friends || []).length === 0 &&(
-                <p className="text-sm text-muted">No friends yet.</p>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <section className="lg:col-span-2 space-y-4 min-w-0">
+            <div className="flex items-center justify-between gap-2 border-b border-border">
+              <div className="flex" role="tablist">
+                <button type="button" role="tab" aria-selected={tab === "posts"} onClick={() => setTab("posts")} className={`tab ${tab === "posts" ? "tab-active" : ""}`}>
+                  Posts ({posts.length})
+                </button>
+                <button type="button" role="tab" aria-selected={tab === "albums"} onClick={() => setTab("albums")} className={`tab ${tab === "albums" ? "tab-active" : ""}`}>
+                  Albums ({albums.length})
+                </button>
+              </div>
+              {isSelf && tab === "albums" &&(
+                <button type="button" className="btn-primary btn-sm mb-1" onClick={() => setModal("album")}>+ New album</button>
               )}
-              <ul className="space-y-2">
-                {(profile.friends || []).slice(0, 10).map((fid) =>
-                {
-                  const friend = peopleById[fid];
-                  const label = friend?.username || String(fid).slice(-4);
-
-                  return(
-                    <li key={fid}>
-                      <Link
-                        to={`/profile/${fid}`}
-                        className="flex items-center gap-2 text-sm text-ink hover:text-pixblue"
-                      >
-                        <Avatar name={label} avatarUrl={friend?.avatar} size={28} />
-                        <span>{label}</span>
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ul>
             </div>
 
-            {isOwnProfile &&(
-              <div className="card">
-                <h3 className="font-heading text-ink mb-3">Friend requests</h3>
-                {(profile.friendRequests || []).length === 0 &&(
-                  <p className="text-sm text-muted">No pending requests.</p>
-                )}
-                <ul className="space-y-2 text-sm">
-                  {(profile.friendRequests || []).map((fid) =>
-                  {
-                    const sender = peopleById[fid];
-                    const label = sender?.username || "Someone";
+            {tab === "posts" &&(
+              <PhotoGrid posts={posts} emptyText={isSelf ? "You haven't shared anything yet. Use \"Share a Memory\" to post your first photo." : "No posts yet."} />
+            )}
 
-                    return(
-                      <li key={fid} className="flex items-center justify-between gap-2">
-                        <span className="flex items-center gap-2 text-ink">
-                          <Avatar name={label} avatarUrl={sender?.avatar} size={28} />
-                          {label}
-                        </span>
-                        {/* accept / decline happens on their profile */}
-                        <Link to={`/profile/${fid}`} className="text-pixblue hover:underline">
-                          Respond
-                        </Link>
-                      </li>
-                    );
-                  })}
-                </ul>
+            {tab === "albums" && albums.length === 0 &&(
+              <p className="text-muted text-sm py-8 text-center">
+                {isSelf ? "No albums yet. Group your photos with \"New album\", or save a friend's post from its page." : "No albums yet."}
+              </p>
+            )}
+
+            {tab === "albums" && albums.length > 0 &&(
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                {albums.map((a) => <AlbumCard key={a._id} album={a} />)}
               </div>
             )}
+          </section>
+
+          <aside className="space-y-4">
+            {isSelf && <VerificationCard data={data.verification ? { progress: data.verification } : null} user={user} onRequested={async() => { await refreshUser(); refresh(); }} />}
+
+            {isSelf &&(
+              <section className="card" aria-labelledby="requests-heading">
+                <h2 id="requests-heading" className="font-heading text-ink mb-3">Friend requests ({data.requests.length})</h2>
+                {data.requests.length === 0 && <p className="text-sm text-muted">No pending requests.</p>}
+                <ul className="space-y-3">
+                  {data.requests.map((p) =>(
+                    <PersonRow key={p._id} person={p}>
+                      <button type="button" onClick={() => respond(p, true)} className="btn-primary btn-sm text-xs px-2.5">Accept</button>
+                      <button type="button" onClick={() => respond(p, false)} className="btn-secondary btn-sm text-xs px-2.5">Decline</button>
+                    </PersonRow>
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            <section className="card" aria-labelledby="friends-heading">
+              <h2 id="friends-heading" className="font-heading text-ink mb-3">Friends ({data.friends.length})</h2>
+              {data.friends.length === 0 && <p className="text-sm text-muted">No friends yet.</p>}
+              <ul className="space-y-3 max-h-96 overflow-y-auto">
+                {data.friends.map((p) =>(
+                  <PersonRow key={p._id} person={p}>
+                    {isSelf && (me.favourites || []).includes(p._id) && <span className="text-pixamber text-sm" title="Favourite">★</span>}
+                  </PersonRow>
+                ))}
+              </ul>
+            </section>
           </aside>
-        )}
-      </div>
+        </div>
+      )}
+
+      {modal === "edit" &&(
+        <Modal title="Edit profile" onClose={() => setModal(null)} size="lg">
+          <EditProfileForm
+            user={user}
+            onCancel={() => setModal(null)}
+            onSaved={async() =>
+            {
+              setModal(null);
+              await refreshUser();
+              refresh();
+              toast("Profile updated");
+            }}
+          />
+        </Modal>
+      )}
+
+      {modal === "album" &&(
+        <Modal title="New album" onClose={() => setModal(null)} size="lg">
+          <AlbumForm
+            myPosts={posts}
+            onCancel={() => setModal(null)}
+            onDone={(album) =>
+            {
+              setModal(null);
+              toast(`Album "${album.name}" created`);
+              navigate(`/album/${album._id}`);
+            }}
+          />
+        </Modal>
       )}
     </div>
   );

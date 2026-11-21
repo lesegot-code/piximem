@@ -1,162 +1,133 @@
 // Student Number: u25143230
-import { useRef, useState } from "react";
-import { updateUser, buildImageUrl } from "../api.js";
+import { useState } from "react";
+import { updateUser } from "../api.js";
+import ImageDropzone, { useFilePreview } from "./ImageDropzone.jsx";
+import Avatar from "./Avatar.jsx";
 
+const FIELDS = [
+  { key: "name", label: "Display name", max: 60, placeholder: "How your name shows on posts" },
+  { key: "username", label: "Username", max: 30, placeholder: "letters, numbers, . and _" },
+  { key: "pronouns", label: "Pronouns", max: 30, placeholder: "e.g. she/her" },
+  { key: "location", label: "Location", max: 60, placeholder: "e.g. Pretoria" },
+  { key: "website", label: "Website or social link", max: 200, placeholder: "e.g. instagram.com/you" },
+];
+
+//edit profile details and picture (also used by admins to edit any account)
 export default function EditProfileForm({ user, onSaved, onCancel })
 {
-  const fileInputRef = useRef(null);
-  const [username, setUsername] = useState(user.username || "");
-  const [bio, setBio] = useState(user.bio || "");
-  const [avatarFile, setAvatarFile] = useState(null);
-  const [avatarPreview, setAvatarPreview] = useState(
-    buildImageUrl(user.avatar) || null
-  );
-  const [dragging, setDragging] = useState(false);
+  const [form, setForm] = useState({
+    name: user.name || "",
+    username: user.username || "",
+    pronouns: user.pronouns || "",
+    location: user.location || "",
+    website: user.website || "",
+    bio: user.bio || "",
+  });
+  const [file, setFile] = useState(null);
+  const [removePhoto, setRemovePhoto] = useState(false);
+  const [shuffle, setShuffle] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const preview = useFilePreview(file);
 
-  function pickFile(f)
+  const hasPhoto = (user.avatar && !removePhoto) || file;
+
+  function change(key, value)
   {
-    if(!f) return;
-    if(!f.type.startsWith("image/"))
-    {
-      setError("Only image files are allowed.");
-      return;
-    }
-    if(f.size > 5 * 1024 * 1024)
-    {
-      setError("Image is too large (max 5 MB).");
-      return;
-    }
+    setForm((f) => ({ ...f, [key]: value }));
     setError("");
-    setAvatarFile(f);
-    setAvatarPreview(URL.createObjectURL(f));
-  }
-
-  function handleDrop(e)
-  {
-    e.preventDefault();
-    setDragging(false);
-    pickFile(e.dataTransfer.files?.[0]);
   }
 
   async function handleSubmit(e)
   {
     e.preventDefault();
-
-    if(username.trim().length < 2)
-    {
-      setError("Username must be at least 2 characters.");
-      return;
-    }
-    if(bio.length > 200)
-    {
-      setError("Bio must be 200 characters or fewer.");
-      return;
-    }
+    if(form.username.trim().length < 2) return setError("Your username needs at least 2 characters.");
 
     setBusy(true);
     setError("");
-
     try
     {
-      const updates = { username: username.trim(), bio: bio.trim() };
-      if(avatarFile) updates.avatar = avatarFile;
-
-      await updateUser(user._id, updates);
-      if(onSaved) onSaved();
+      const { user: saved } = await updateUser(user._id, {
+        ...form,
+        avatar: file || undefined,
+        removeAvatar: removePhoto && !file ? "true" : undefined,
+        shuffleAvatar: shuffle ? "true" : undefined,
+      });
+      onSaved(saved);
     }
     catch(err)
     {
       setError(err.message);
-    }
-    finally
-    {
       setBusy(false);
     }
   }
 
   return(
-    <form onSubmit={handleSubmit} className="card space-y-4">
-      <h2 className="font-heading text-lg text-ink">Edit profile</h2>
+    <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+      <ImageDropzone
+        label="Profile picture"
+        compact
+        round
+        preview={preview || (hasPhoto ? user.avatar : null)}
+        onFile={(f) => { setFile(f); setRemovePhoto(false); }}
+        onError={setError}
+      />
 
-      {/* avatar drop zone */}
-      <div
-        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-        onDragLeave={(e) => { e.preventDefault(); setDragging(false); }}
-        onDrop={handleDrop}
-        onClick={() => fileInputRef.current?.click()}
-        className={`flex items-center gap-4 p-3 border-2 border-dashed rounded-xl cursor-pointer transition ${
-          dragging ? "border-pixblue bg-pixblue/10" : "border-border hover:border-pixblue/60"
-        }`}
-      >
-        {avatarPreview ?(
-          <img
-            src={avatarPreview}
-            alt="Avatar preview"
-            className="w-16 h-16 rounded-full object-cover border border-border"
-          />
-        ) :(
-          <div className="w-16 h-16 rounded-full bg-bg border border-border flex items-center justify-center text-muted text-xs">
-            No photo
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        {hasPhoto
+          ? (
+            <button type="button" className="link" onClick={() => { setFile(null); setRemovePhoto(true); }}>
+              Remove photo and use a generated avatar
+            </button>
+          )
+          : (
+            <>
+              <Avatar user={{ ...user, avatar: null, avatarSeed: shuffle ? `${user.avatarSeed}-next` : user.avatarSeed }} size="md" />
+              <button type="button" className="link" onClick={() => setShuffle((s) => !s)}>
+                {shuffle ? "Keep my current pattern" : "Shuffle my generated avatar"}
+              </button>
+              {shuffle && <span className="text-xs text-muted">A brand new pattern is made when you save.</span>}
+            </>
+          )}
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {FIELDS.map((f) =>(
+          <div key={f.key} className={f.key === "website" ? "sm:col-span-2" : ""}>
+            <label htmlFor={`profile-${f.key}`} className="label">{f.label}</label>
+            <input
+              id={`profile-${f.key}`}
+              className="input"
+              value={form[f.key]}
+              maxLength={f.max}
+              placeholder={f.placeholder}
+              onChange={(e) => change(f.key, e.target.value)}
+            />
           </div>
-        )}
-        <div className="text-sm">
-          <p className="font-medium text-ink">Profile picture</p>
-          <p className="text-muted">Drag & drop, or click to choose</p>
-        </div>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={(e) => pickFile(e.target.files?.[0])}
-        />
+        ))}
       </div>
 
       <div>
-        <label htmlFor="edit-username" className="block text-sm text-muted mb-1">
-          Username
-        </label>
-        <input
-          id="edit-username"
-          className="input"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          required
-          maxLength={40}
-        />
-      </div>
-
-      <div>
-        <label htmlFor="edit-bio" className="block text-sm text-muted mb-1">
-          Bio
-        </label>
+        <label htmlFor="profile-bio" className="label">Bio</label>
         <textarea
-          id="edit-bio"
+          id="profile-bio"
           className="input resize-none"
           rows={3}
-          value={bio}
-          onChange={(e) => setBio(e.target.value)}
+          value={form.bio}
+          onChange={(e) => change("bio", e.target.value)}
           maxLength={200}
-          placeholder="A short intro for other users…"
+          placeholder="A short intro for other people"
         />
-        <p className="text-xs text-muted mt-1">{bio.length}/200</p>
+        <p className="text-xs text-muted mt-1 text-right">{form.bio.length}/200</p>
       </div>
 
-      {error &&(
-        <p className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
-          {error}
-        </p>
-      )}
+      <p className="text-xs text-muted">Everything here is public. Your email address is never shown to other people.</p>
+
+      {error && <p className="error-box" role="alert">{error}</p>}
 
       <div className="flex justify-end gap-2">
-        <button type="button" onClick={onCancel} className="btn-secondary">
-          Cancel
-        </button>
-        <button type="submit" disabled={busy} className="btn-primary">
-          {busy ? "Saving…" : "Save changes"}
-        </button>
+        <button type="button" onClick={onCancel} className="btn-secondary">Cancel</button>
+        <button type="submit" disabled={busy} className="btn-primary">{busy ? "Saving…" : "Save changes"}</button>
       </div>
     </form>
   );

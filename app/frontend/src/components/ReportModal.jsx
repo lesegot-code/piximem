@@ -1,93 +1,85 @@
-// Student Number: 25143230
-import { useState } from "react";
-import { reportPost } from "../api.js";
-import { useAuth } from "../context/AuthContext.jsx";
+// Student Number: u25143230
+import { useEffect, useState } from "react";
+import { getReasons, reportPost } from "../api.js";
+import Modal from "./Modal.jsx";
 
-const REASONS = [
-  "Spam or misleading",
-  "Inappropriate content",
-  "Harassment or hate",
-  "Copyright violation",
-  "Other",
-];
-
+//reasons come from the database, only admins can add new ones
 export default function ReportModal({ post, onClose, onReported })
 {
-  const { user } = useAuth();
-  const [reason, setReason] = useState(REASONS[0]);
+  const [reasons, setReasons] = useState(null);
+  const [reasonId, setReasonId] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+
+  useEffect(() =>
+  {
+    let cancelled = false;
+    getReasons()
+      .then((list) => { if(!cancelled) setReasons(list); })
+      .catch((err) => { if(!cancelled) setError(err.message); });
+    return() => { cancelled = true; };
+  }, []);
 
   async function handleSubmit(e)
   {
     e.preventDefault();
+    if(!reasonId) return setError("Choose a reason first.");
+
     setBusy(true);
     setError("");
-
     try
     {
-      await reportPost(post._id, user._id, reason);
-      if(onReported) onReported();
-      onClose();
+      await reportPost(post._id, reasonId);
+      onReported();
     }
     catch(err)
     {
       setError(err.message);
-    }
-    finally
-    {
       setBusy(false);
     }
   }
 
   return(
-    <div
-      className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-    >
-      <form
-        onSubmit={handleSubmit}
-        onClick={(e) => e.stopPropagation()}
-        className="card max-w-sm w-full space-y-3"
-      >
-        <h2 className="font-heading text-lg text-ink">Report this post</h2>
+    <Modal title="Report this post" onClose={onClose} size="sm">
+      <form onSubmit={handleSubmit} className="space-y-4">
         <p className="text-sm text-muted">
-          Tell us why. Reports help keep Pixel Memory a safe place to share.
+          Reports are anonymous. A post reported by 3 people is hidden until a moderator reviews it.
         </p>
 
-        <div>
-          <label htmlFor="report-reason" className="block text-sm text-muted mb-1">
-            Reason
-          </label>
-          <select
-            id="report-reason"
-            className="input"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-          >
-            {REASONS.map((r) =>(
-              <option key={r} value={r}>{r}</option>
+        <fieldset>
+          <legend className="label">Why are you reporting it?</legend>
+          {!reasons && !error && <p className="text-sm text-muted">Loading reasons…</p>}
+          <div className="space-y-2 mt-1">
+            {(reasons || []).map((r) =>(
+              <label
+                key={r._id}
+                className={`flex items-center gap-3 px-3 py-2 rounded-xl border cursor-pointer text-sm transition ${
+                  reasonId === r._id ? "border-pixblue bg-pixblue/10 text-ink" : "border-border text-muted hover:text-ink"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="reason"
+                  value={r._id}
+                  checked={reasonId === r._id}
+                  onChange={() => { setReasonId(r._id); setError(""); }}
+                  className="accent-[#3B82F6]"
+                />
+                {r.label}
+              </label>
             ))}
-          </select>
-        </div>
+          </div>
+        </fieldset>
 
-        {error &&(
-          <p className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
-            {error}
-          </p>
-        )}
+        {error && <p className="error-box" role="alert">{error}</p>}
 
-        <div className="flex justify-end gap-2 pt-1">
-          <button type="button" onClick={onClose} className="btn-secondary">
-            Cancel
-          </button>
-          <button type="submit" disabled={busy} className="btn-primary">
-            {busy ? "Reporting…" : "Report"}
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="btn-secondary btn-sm">Cancel</button>
+          <button type="submit" disabled={busy || !reasons} className="btn-primary btn-sm">
+            {busy ? "Sending…" : "Send report"}
           </button>
         </div>
       </form>
-    </div>
+    </Modal>
   );
 }
