@@ -6,7 +6,7 @@ import {
   HttpError, toId, sameId, includesId, cleanText, parseHashtags, enrichPosts, notify,
 } from "../lib/helpers.js";
 import { canManage } from "../lib/auth.js";
-import { upload, removeUpload } from "../lib/upload.js";
+import { upload, storeUpload, discardUpload } from "../lib/upload.js";
 import { deletePost } from "../lib/cascade.js";
 
 const router = Router();
@@ -45,7 +45,7 @@ router.post("/", upload.single("image"), async(req, res) =>
   if(!req.file) throw new HttpError(400, "Please add a photo to your post.");
   if(caption.length < 3)
   {
-    removeUpload(req.file.filename);
+    discardUpload(req.file);
     throw new HttpError(400, "Write a caption of at least 3 characters.");
   }
 
@@ -54,7 +54,7 @@ router.post("/", upload.single("image"), async(req, res) =>
     userId: req.user._id,
     caption,
     hashtags: parseHashtags(req.body.hashtags),
-    image: req.file.filename,
+    image: await storeUpload(req.file),
     comments: [],
     reports: [],
     createdAt: new Date(), //set by the server, never by the user

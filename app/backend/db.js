@@ -15,7 +15,8 @@ export async function connectToMongoDB(){
         //give up after 10s instead of hanging
         client = new MongoClient(uri, { serverSelectionTimeoutMS: 10000 });
         await client.connect();
-        db = client.db("DBExample");
+        //tests use their own database name so they never touch real data
+        db = client.db(process.env.MONGODB_DB || "DBExample");
         console.log("You successfully connected to MongoDB!");
 
         return client;

@@ -7,7 +7,7 @@ import {
   miniUser, publicUser, selfUser, usersById, enrichPosts, imageUrl,
 } from "../lib/helpers.js";
 import { canManage } from "../lib/auth.js";
-import { upload, removeUpload } from "../lib/upload.js";
+import { upload, storeUpload, discardUpload, removeUpload } from "../lib/upload.js";
 import { deleteUser } from "../lib/cascade.js";
 import { usernameTaken } from "./auth.js";
 
@@ -126,6 +126,19 @@ export async function albumCards(db, albums)
 //edit profile (own account, or any account for admins). multipart so an avatar can be uploaded
 router.put("/:id", upload.single("avatar"), async(req, res) =>
 {
+  try
+  {
+    await updateProfile(req, res);
+  }
+  catch(err)
+  {
+    discardUpload(req.file); //don't keep a photo from a form that failed
+    throw err;
+  }
+});
+
+async function updateProfile(req, res)
+{
   const db = getDB();
   const user = await findUser(db, req.params.id);
 
@@ -176,8 +189,8 @@ router.put("/:id", upload.single("avatar"), async(req, res) =>
 
   if(req.file)
   {
+    updates.avatar = await storeUpload(req.file);
     removeUpload(user.avatar);
-    updates.avatar = req.file.filename;
   }
 
   //only admins can verify accounts from here
@@ -190,7 +203,7 @@ router.put("/:id", upload.single("avatar"), async(req, res) =>
   const fresh = await db.collection("users").findOne({ _id: user._id });
 
   res.json({ user: sameId(fresh._id, req.user._id) ? selfUser(fresh) : publicUser(fresh) });
-});
+}
 
 router.delete("/:id", async(req, res) =>
 {
