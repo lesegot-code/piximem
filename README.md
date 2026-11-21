@@ -1,10 +1,13 @@
 # Pixel Memory
 
+[![CI](https://github.com/lesegot-code/piximem/actions/workflows/ci.yml/badge.svg)](https://github.com/lesegot-code/piximem/actions/workflows/ci.yml)
+
 Every picture holds a memory. Share the ones that matter most.
+
 
 Pixel Memory is a photo sharing website. You post photos with captions and hashtags, collect them in albums, add friends and follow their activity. Moderators look after reported posts. It started as my IMY 220 project at the University of Pretoria (2026).
 
-**Stack:** React 19, React Router, Tailwind CSS, Vite · Node.js, Express 5, MongoDB · Docker Compose
+**Stack:** React 19, React Router, Tailwind CSS, Vite · Node.js, Express 5, MongoDB · Docker · GitHub Actions
 
 ## Features
 
@@ -51,8 +54,9 @@ Pixel Memory is a photo sharing website. You post photos with captions and hasht
    MONGODB_URI=mongodb+srv://USER:PASSWORD@cluster.xxxxx.mongodb.net/?retryWrites=true&w=majority
    ```
    In Atlas, open **Network Access** and allow your IP address (or `0.0.0.0/0`).
-2. From this folder, build and start both containers:
+2. From the `app` folder, build and start both containers:
    ```
+   cd app
    docker compose up -d --build
    ```
 3. Fill the database with demo data. **This wipes the database.**
@@ -76,6 +80,49 @@ cd frontend && npm install && npm run dev                    # http://localhost:
 ```
 
 The frontend forwards `/api` and `/uploads` to the backend (see `frontend/vite.config.js`). The browser only ever talks to one address, so the session cookie works without CORS. Inside Docker, the `API_TARGET` variable points the frontend at the `backend` container.
+
+## Tests
+
+There are three layers, and all of them run in GitHub Actions on every push and pull request.
+
+| Layer | What it checks | Command |
+| --- | --- | --- |
+| Unit tests (`backend/test/unit.test.js`) | Fuzzy search, hashtags, ids, password hashing, Cloudinary signing | `cd app/backend && npm run test:unit` |
+| API tests (`backend/test/api.test.js`) | The real Express app against a real MongoDB: sessions, privacy, friends, posts, albums, feed filters, search, verification, admin, cascading deletes | `npm run test:api` |
+| End-to-end tests (`frontend/e2e/`) | Playwright in Chrome, desktop and phone sizes: every main flow, plus no console errors and no sideways scrolling | `cd app/frontend && npm run test:e2e` |
+
+The API and end-to-end tests **wipe the database they use**, so give them their own database name:
+
+```
+# a local MongoDB works well: docker run -d -p 27017:27017 mongo:7
+export MONGODB_URI=mongodb://localhost:27017
+export MONGODB_DB=piximem_test
+cd app/backend && npm test
+cd ../frontend && npx playwright install chromium && npm run test:e2e
+```
+
+Playwright starts the backend and frontend itself and seeds the test database first.
+
+## CI/CD
+
+`.github/workflows/ci.yml` runs four jobs on every push and pull request:
+
+1. **Frontend:** `npm ci`, lint, production build
+2. **Backend:** unit and API tests against a MongoDB 7 service container
+3. **End-to-end:** Playwright against the real backend, frontend and MongoDB. Its report is uploaded when something fails.
+4. **Docker:** builds the development images and the production image, then starts the production image and checks that it serves the site
+
+## Production build (ready for hosting later)
+
+The site isn't hosted yet, but it's ready to be. `app/Dockerfile` builds a single production image in which the backend serves the built React app (one address, no CORS):
+
+```
+cd app
+docker build -t pixel-memory .
+docker run -p 3000:3000 --env-file backend/.env pixel-memory     # http://localhost:3000
+```
+
+`render.yaml` describes a Render web service that deploys `main` only after CI passes. When the app is hosted, setting `CLOUDINARY_URL` stores uploaded photos in Cloudinary instead of on the server's disk.
 
 ## Demo accounts
 

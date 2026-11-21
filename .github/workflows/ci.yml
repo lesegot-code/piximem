@@ -1,0 +1,149 @@
+# Runs on every push and pull request. Render only deploys main after all of these pass.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# a newer push to the same branch cancels the older run
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: 22
+
+jobs:
+  frontend:
+    name: Frontend lint and build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app/frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: app/frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+
+  backend:
+    name: Backend unit and API tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app/backend
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      MONGODB_URI: mongodb://localhost:27017
+      MONGODB_DB: piximem_test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: app/backend/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  e2e:
+    name: End-to-end tests (Playwright)
+    needs: [frontend, backend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      CI: true
+      MONGODB_URI: mongodb://localhost:27017
+      MONGODB_DB: piximem_e2e
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            app/backend/package-lock.json
+            app/frontend/package-lock.json
+      - name: Install backend
+        run: npm ci
+        working-directory: app/backend
+      - name: Install frontend
+        run: npm ci
+        working-directory: app/frontend
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+        working-directory: app/frontend
+      - name: Run end-to-end tests
+        run: npm run test:e2e
+        working-directory: app/frontend
+      - name: Keep the test report when something fails
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            app/frontend/playwright-report
+            app/frontend/test-results
+          retention-days: 7
+
+  docker:
+    name: Docker images build and start
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Development images (docker compose) build
+        run: |
+          touch backend/.env
+          docker compose build
+
+      - name: Production image builds
+        run: docker build -t pixel-memory .
+
+      #with no database the app should still start, serve the site and report "starting"
+      - name: Production image starts and serves the site
+        run: |
+          docker run -d --name smoke -p 3000:3000 pixel-memory
+          for i in $(seq 1 30); do
+            curl -s -o /dev/null http://localhost:3000/api/health && break
+            sleep 1
+          done
+          curl -s http://localhost:3000/api/health | tee /dev/stderr | grep -q '"connecting"'
+          curl -sf http://localhost:3000/ | grep -q '<div id="root">'
+          curl -sf http://localhost:3000/profile/anything | grep -q '<div id="root">'
+          curl -sf -o /dev/null http://localhost:3000/images/logo.png
+          curl -sf -o /dev/null http://localhost:3000/uploads/Lion1.jpg
+          docker logs smoke
+          docker rm -f smoke
