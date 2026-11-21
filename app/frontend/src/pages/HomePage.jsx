@@ -1,291 +1,332 @@
 // Student Number: u25143230
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
-import { getPosts, getAllUsers, getUser } from "../api.js";
-import PostPreview from "../components/PostPreview.jsx";
-import AddPostForm from "../components/AddPostForm.jsx";
+import { useUi } from "../context/UiContext.jsx";
+import { getFeed, getPeopleSuggestions, getTrendingHashtags, sendFriendRequest } from "../api.js";
+import PostCard, { AlbumActivityCard } from "../components/PostCard.jsx";
 import SearchInput from "../components/SearchInput.jsx";
+import Avatar from "../components/Avatar.jsx";
+import UserName from "../components/UserName.jsx";
+import { plural } from "../utils/format.js";
 
 const SORTS = [
-  { id: "newest", label: "Newest" },
-  { id: "popular", label: "Most commented" },
+  { id: "newest", label: "Newest first" },
+  { id: "commented", label: "Most commented" },
 ];
+
+const RANGES = [
+  { id: "all", label: "Any time" },
+  { id: "day", label: "Today" },
+  { id: "week", label: "This week" },
+  { id: "month", label: "This month" },
+];
+
+function FeedSkeleton()
+{
+  return(
+    <div className="space-y-4" aria-label="Loading feed">
+      {[0, 1].map((i) => <div key={i} className="skeleton h-96" />)}
+    </div>
+  );
+}
+
+function PeopleYouMayKnow()
+{
+  const { toast } = useUi();
+  const [people, setPeople] = useState([]);
+
+  useEffect(() =>
+  {
+    let cancelled = false;
+    getPeopleSuggestions().then((list) => { if(!cancelled) setPeople(list); }).catch(() => {});
+    return() => { cancelled = true; };
+  }, []);
+
+  async function add(entry)
+  {
+    try
+    {
+      const { friendship } = await sendFriendRequest(entry.user._id);
+      setPeople((list) => list.map((p) => (p.user._id === entry.user._id
+        ? { ...p, requested: friendship === "request-sent", friends: friendship === "friends" }
+        : p)));
+      toast(friendship === "friends" ? `You and ${entry.user.username} are now friends` : `Friend request sent to ${entry.user.username}`);
+    }
+    catch(err)
+    {
+      toast(err.message, "error");
+    }
+  }
+
+  if(!people.length) return null;
+
+  return(
+    <section className="card" aria-labelledby="people-heading">
+      <h2 id="people-heading" className="font-heading text-ink mb-3">People you may know</h2>
+      <ul className="space-y-3">
+        {people.map((p) =>(
+          <li key={p.user._id} className="flex items-center gap-3">
+            <Link to={`/profile/${p.user._id}`} aria-label={`${p.user.username}'s profile`}>
+              <Avatar user={p.user} size="sm" />
+            </Link>
+            <div className="flex-1 min-w-0 text-sm">
+              <UserName user={p.user} />
+              <p className="text-xs text-muted">
+                {p.wantsYou ? "Wants to be your friend" : p.mutual ? plural(p.mutual, "mutual friend") : `@${p.user.username}`}
+              </p>
+            </div>
+            {p.friends
+              ? <span className="text-xs text-success">Friends</span>
+              : p.requested
+                ? <span className="text-xs text-muted">Requested</span>
+                : (
+                  <button type="button" onClick={() => add(p)} className="btn-secondary btn-sm text-xs">
+                    {p.wantsYou ? "Accept" : "Add"}
+                  </button>
+                )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
 
 export default function HomePage()
 {
   const { user } = useAuth();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const q = searchParams.get("q") || "";
-  const composeOpen = searchParams.get("compose") === "1";
+  const { setComposeOpen, dataVersion } = useUi();
+  const [params, setParams] = useSearchParams();
 
-  const [posts, setPosts] = useState([]);
-  const [users, setUsers] = useState([]);
-  const [me, setMe] = useState(null);
+  //filters live in the url so the back button and refresh keep them
+  const scope = params.get("feed") === "global" ? "global" : "local";
+  const sort = params.get("sort") === "commented" ? "commented" : "newest";
+  const range = RANGES.some((r) => r.id === params.get("range")) ? params.get("range") : "all";
+  const tag = params.get("tag") || "";
+
+  const [items, setItems] = useState([]);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
+  const [trending, setTrending] = useState([]);
+  const [retry, setRetry] = useState(0);
 
-  const [feedType, setFeedType] = useState("local"); // "local" | "global"
-  const [sortBy, setSortBy] = useState("newest");
+  function setFilter(key, value, fallback)
+  {
+    setParams((prev) =>
+    {
+      const next = new URLSearchParams(prev);
+      if(!value || value === fallback) next.delete(key);
+      else next.set(key, value);
+      return next;
+    }, { replace: true });
+  }
 
-  // load everything once on mount
+  //first page whenever a filter changes (or a new post was shared)
   useEffect(() =>
   {
     let cancelled = false;
 
-    async function load()
-    {
-      setLoading(true);
-      setError("");
-
-      try
+    getFeed({ scope, sort, range, tag, page: 1 })
+      .then((data) =>
       {
-        const [postList, userList] = await Promise.all([
-          getPosts(),
-          getAllUsers(),
-        ]);
-
         if(cancelled) return;
+        setItems(data.items);
+        setHasMore(data.hasMore);
+        setTotal(data.total);
+        setPage(1);
+        setError("");
+      })
+      .catch((err) => { if(!cancelled) setError(err.message); })
+      .finally(() => { if(!cancelled) setLoading(false); });
 
-        setPosts(postList);
-        setUsers(userList);
-
-        // fetch profile (for friends list)
-        const own = await getUser(user._id);
-        if(cancelled) return;
-        setMe(own);
-      }
-      catch(err)
-      {
-        if(!cancelled) setError(err.message);
-      }
-      finally
-      {
-        if(!cancelled) setLoading(false);
-      }
-    }
-
-    load();
     return() => { cancelled = true; };
-  }, [user._id]);
+  }, [scope, sort, range, tag, dataVersion, retry]);
 
-  // map userId -> user object for fast lookups
-  const usersById = useMemo(() =>
+  useEffect(() =>
   {
-    const map = {};
-    for(const u of users) map[u._id] = u;
-    return map;
-  }, [users]);
+    let cancelled = false;
+    getTrendingHashtags().then((list) => { if(!cancelled) setTrending(list); }).catch(() => {});
+    return() => { cancelled = true; };
+  }, [dataVersion]);
 
-  // filter posts by feed type, search query, and sort
-  const visiblePosts = useMemo(() =>
+  async function loadMore()
   {
-    let list = [...posts];
-
-    // local feed = my friends + me (a search looks through everyone's posts)
-    if(feedType === "local" && me && !q)
+    setLoadingMore(true);
+    try
     {
-      const myFriends = (me.friends || []).map((f) => f.toString());
-      const allowed = new Set([user._id, ...myFriends]);
-      list = list.filter((p) => allowed.has(p.userId.toString()));
+      const data = await getFeed({ scope, sort, range, tag, page: page + 1 });
+      setItems((list) => [...list, ...data.items]);
+      setHasMore(data.hasMore);
+      setPage((p) => p + 1);
     }
-
-    // search filter
-    if(q)
+    catch(err)
     {
-      const needle = q.toLowerCase();
-
-      if(needle.startsWith("#"))
-      {
-        const tag = needle.slice(1);
-        list = list.filter((p) =>
-          (p.hashtags || []).some((h) => h.toLowerCase().includes(tag))
-        );
-      }
-      else
-      {
-        list = list.filter((p) =>
-          p.caption?.toLowerCase().includes(needle)
-        );
-      }
+      setError(err.message);
     }
-
-    // sort
-    if(sortBy === "newest")
+    finally
     {
-      list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      setLoadingMore(false);
     }
-    else if(sortBy === "popular")
-    {
-      list.sort((a, b) => (b.comments?.length || 0) - (a.comments?.length || 0));
-    }
-
-    return list;
-  }, [posts, feedType, sortBy, q, me, user._id]);
-
-  // when the user clicks "Share a Memory" in navbar
-  function openCompose()
-  {
-    setSearchParams((prev) =>
-    {
-      const next = new URLSearchParams(prev);
-      next.set("compose", "1");
-      return next;
-    });
   }
 
-  function closeCompose()
-  {
-    setSearchParams((prev) =>
-    {
-      const next = new URLSearchParams(prev);
-      next.delete("compose");
-      return next;
-    });
-  }
-
-  function handleCreated(newPost)
-  {
-    setPosts([newPost, ...posts]);
-    closeCompose();
-  }
+  const filtered = sort !== "newest" || range !== "all" || tag;
 
   return(
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      {/* main feed */}
-      <section className="lg:col-span-2 space-y-4">
-        {/* search + filters */}
-        <div className="space-y-3">
-          {/* key resets the box when the query changes (e.g. hashtag click) */}
-          <SearchInput key={q} initialValue={q} />
+      <section className="lg:col-span-2 space-y-4 min-w-0" aria-labelledby="feed-heading">
+        <h1 id="feed-heading" className="sr-only">Activity feed</h1>
+        <SearchInput className="lg:hidden" />
 
+        {/* feed controls */}
+        <div className="card space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            {/* feed switch */}
-            <div className="inline-flex rounded-xl border border-border overflow-hidden">
-              <button
-                onClick={() => setFeedType("local")}
-                className={`px-4 py-1.5 text-sm font-medium transition ${
-                  feedType === "local"
-                    ? "bg-pixblue text-white"
-                    : "text-muted hover:text-ink"
-                }`}
-              >
-                Local
-              </button>
-              <button
-                onClick={() => setFeedType("global")}
-                className={`px-4 py-1.5 text-sm font-medium transition ${
-                  feedType === "global"
-                    ? "bg-pixblue text-white"
-                    : "text-muted hover:text-ink"
-                }`}
-              >
-                Global
-              </button>
+            <div className="inline-flex rounded-xl border border-border overflow-hidden" role="group" aria-label="Which feed">
+              {[["local", "Friends"], ["global", "Everyone"]].map(([id, label]) =>(
+                <button
+                  key={id}
+                  type="button"
+                  aria-pressed={scope === id}
+                  onClick={() => { setLoading(true); setFilter("feed", id, "local"); }}
+                  className={`px-4 py-1.5 text-sm font-medium transition ${
+                    scope === id ? "bg-pixblue text-white" : "text-muted hover:text-ink"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
 
-            {/* sort dropdown */}
+            <label htmlFor="feed-sort" className="sr-only">Sort the feed</label>
             <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
+              id="feed-sort"
+              value={sort}
+              onChange={(e) => { setLoading(true); setFilter("sort", e.target.value, "newest"); }}
               className="input py-1.5 text-sm w-auto"
-              aria-label="Sort feed"
             >
-              {SORTS.map((s) =>(
-                <option key={s.id} value={s.id}>{s.label}</option>
-              ))}
+              {SORTS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
             </select>
 
-            {/* clear search */}
-            {q &&(
-              <button
-                onClick={() => setSearchParams({})}
-                className="text-sm text-muted hover:text-ink"
-              >
-                ✕ Clear search
-              </button>
-            )}
+            <label htmlFor="feed-range" className="sr-only">Time range</label>
+            <select
+              id="feed-range"
+              value={range}
+              onChange={(e) => { setLoading(true); setFilter("range", e.target.value, "all"); }}
+              className="input py-1.5 text-sm w-auto"
+            >
+              {RANGES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+            </select>
           </div>
 
-          {q &&(
-            <p className="text-sm text-muted">
-              Showing results from all users for <span className="text-ink font-medium">"{q}"</span>
-            </p>
+          {tag &&(
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-muted">Only showing</span>
+              <button
+                type="button"
+                className="chip chip-active py-1"
+                onClick={() => { setLoading(true); setFilter("tag", ""); }}
+                aria-label={`Stop filtering by ${tag}`}
+              >
+                {tag} <span aria-hidden="true">✕</span>
+              </button>
+            </div>
           )}
+
+          <p className="text-xs text-muted">
+            {scope === "local"
+              ? "Posts and albums from you and your friends."
+              : "Posts and albums from everyone on Pixel Memory."}
+            {" "}Favourite friends always show first.
+            {!loading && ` ${plural(total, "item")}.`}
+          </p>
         </div>
 
-        {/* compose modal / inline form */}
-        {composeOpen &&(
-          <AddPostForm onCreated={handleCreated} onCancel={closeCompose} />
-        )}
-
-        {/* feed */}
-        {loading &&(
-          <p className="text-muted text-center py-8">Loading feed…</p>
-        )}
+        {loading && <FeedSkeleton />}
 
         {!loading && error &&(
-          <p className="text-red-400 text-sm bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
-            {error}
-          </p>
-        )}
-
-        {!loading && !error && visiblePosts.length === 0 &&(
-          <div className="card text-center py-10">
-            <p className="text-muted">
-              {q
-                ? "No posts match your search."
-                : feedType === "local"
-                  ? "Your friends haven't shared anything yet — be the first!"
-                  : "No memories here yet."
-              }
-            </p>
+          <div className="error-box flex items-center justify-between gap-3" role="alert">
+            <span>{error}</span>
+            <button type="button" className="link" onClick={() => { setLoading(true); setRetry((n) => n + 1); }}>Try again</button>
           </div>
         )}
 
-        {!loading && !error && visiblePosts.map((post) =>(
-          <PostPreview
-            key={post._id}
-            post={post}
-            author={usersById[post.userId] || usersById[post.userId?.toString()]}
-          />
-        ))}
+        {!loading && !error && items.length === 0 &&(
+          <div className="card text-center py-12 space-y-3">
+            <p className="text-ink font-medium">
+              {filtered ? "Nothing matches these filters." : scope === "local" ? "Your friends haven't shared anything yet." : "No memories here yet."}
+            </p>
+            <div className="flex flex-wrap justify-center gap-2">
+              {filtered &&(
+                <button type="button" className="btn-secondary btn-sm" onClick={() => { setLoading(true); setParams({ feed: scope }, { replace: true }); }}>
+                  Clear filters
+                </button>
+              )}
+              {scope === "local" &&(
+                <button type="button" className="btn-secondary btn-sm" onClick={() => { setLoading(true); setFilter("feed", "global", "local"); }}>
+                  See everyone's posts
+                </button>
+              )}
+              <button type="button" className="btn-primary btn-sm" onClick={() => setComposeOpen(true)}>Share a Memory</button>
+            </div>
+          </div>
+        )}
+
+        {!loading && items.map((item, i) =>
+          item.type === "post"
+            ? <PostCard key={`p-${item.post._id}`} post={item.post} favourite={item.favourite} />
+            : <AlbumActivityCard key={`a-${item.album._id}-${i}`} item={item} />
+        )}
+
+        {!loading && hasMore &&(
+          <div className="text-center">
+            <button type="button" onClick={loadMore} disabled={loadingMore} className="btn-secondary">
+              {loadingMore ? "Loading…" : "Load more"}
+            </button>
+          </div>
+        )}
       </section>
 
-      {/* sidebar */}
-      <aside className="space-y-4 lg:sticky lg:top-24 self-start">
-        <div className="card">
-          <h3 className="font-heading text-ink mb-2">Quick actions</h3>
-          <button onClick={openCompose} className="btn-primary w-full mb-2">
+      <aside className="space-y-4 lg:sticky lg:top-24 self-start" aria-label="Sidebar">
+        <section className="card">
+          <div className="flex items-center gap-3 mb-4">
+            <Avatar user={user} size="lg" />
+            <div className="min-w-0">
+              <UserName user={user} />
+              <p className="text-xs text-muted truncate">@{user.username}</p>
+            </div>
+          </div>
+          <button type="button" onClick={() => setComposeOpen(true)} className="btn-primary w-full mb-2">
             Share a Memory
           </button>
-          <Link to={`/profile/${user._id}`} className="btn-secondary w-full block text-center">
-            View my profile
+          <Link to={`/profile/${user._id}?tab=albums`} className="btn-secondary w-full">
+            My albums
           </Link>
-        </div>
+        </section>
 
-        <div className="card">
-          <h3 className="font-heading text-ink mb-2">Friends You May Know</h3>
-          {users.length === 0 &&(
-            <p className="text-sm text-muted">No users yet.</p>
-          )}
-          <ul className="space-y-2">
-            {users
-              .filter((u) => u._id !== user._id)
-              .filter((u) => !(me?.friends || []).some((f) => f.toString() === u._id))
-              .slice(0, 5)
-              .map((u) =>(
-                <li key={u._id}>
-                  <Link to={`/profile/${u._id}`} className="flex items-center gap-2 text-sm hover:text-pixblue">
-                    <span className="w-8 h-8 rounded-full bg-pixblue/20 text-pixblue flex items-center justify-center font-semibold">
-                      {u.username?.[0]?.toUpperCase() || "?"}
-                    </span>
-                    <span>{u.username}</span>
-                  </Link>
-                </li>
+        {trending.length > 0 &&(
+          <section className="card" aria-labelledby="trending-heading">
+            <h2 id="trending-heading" className="font-heading text-ink mb-1">Trending hashtags</h2>
+            <p className="text-xs text-muted mb-3">Tap one to filter your feed.</p>
+            <div className="flex flex-wrap gap-2">
+              {trending.map((t) =>(
+                <button
+                  key={t.tag}
+                  type="button"
+                  aria-pressed={tag === t.tag}
+                  onClick={() => { setLoading(true); setFilter("tag", tag === t.tag ? "" : t.tag); }}
+                  className={`chip py-1 ${tag === t.tag ? "chip-active" : ""}`}
+                >
+                  {t.tag} <span className="text-[10px] opacity-70">{t.count}</span>
+                </button>
               ))}
-          </ul>
-        </div>
+            </div>
+          </section>
+        )}
+
+        <PeopleYouMayKnow />
       </aside>
     </div>
   );

@@ -2,27 +2,49 @@ import { createContext, useContext, useEffect, useState } from "react";
 
 const ThemeContext = createContext(null);
 
-export function ThemeProvider({ children }) 
+function startingTheme()
 {
-    const [theme, setTheme] = useState(
-        () => localStorage.getItem("piximem_theme") || "dark"
-    );
+  try
+  {
+    const saved = localStorage.getItem("piximem_theme");
+    if(saved) return saved;
+  }
+  catch
+  {
+    //storage can be blocked, fall through to the system setting
+  }
 
-    useEffect(() => {
-        document.documentElement.setAttribute("data-theme", theme);
-        localStorage.setItem("piximem_theme", theme);
-    }, [theme]);
-
-    const toggleTheme = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
-
-    return(
-        <ThemeContext.Provider value={{ theme, toggleTheme }}>
-            {children}
-        </ThemeContext.Provider>
-    );
+  return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
 }
 
-export function useTheme() 
+export function ThemeProvider({ children })
 {
-    return useContext(ThemeContext);
+  const [theme, setTheme] = useState(startingTheme);
+
+  useEffect(() =>
+  {
+    document.documentElement.setAttribute("data-theme", theme);
+    try
+    {
+      localStorage.setItem("piximem_theme", theme);
+    }
+    catch
+    {
+      //the theme still works for this visit
+    }
+  }, [theme]);
+
+  const toggleTheme = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
+
+  return(
+    <ThemeContext.Provider value={{ theme, toggleTheme }}>
+      {children}
+    </ThemeContext.Provider>
+  );
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function useTheme()
+{
+  return useContext(ThemeContext);
 }

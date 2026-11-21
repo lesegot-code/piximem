@@ -1,45 +1,61 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { getMe, logout as apiLogout } from "../api.js";
 
 const AuthContext = createContext(null);
 
-export function AuthProvider({ children }) 
+export function AuthProvider({ children })
 {
-    //read the saved user before the first render, so a refresh keeps you logged in
-    const [user, setUser] = useState(() => {
-        const saved = localStorage.getItem("piximem_user");
-        return saved ? JSON.parse(saved) : null;
-    });
+  const [user, setUser] = useState(null);
+  const [ready, setReady] = useState(false); //true once we know if there is a session
 
-    //keeping localStorage in sync, whenever user changes
-    useEffect(() => {
-        if(user) 
-        {
-            localStorage.setItem("piximem_user", JSON.stringify(user));
-        } 
-        else 
-        {
-            localStorage.removeItem("piximem_user");
-        }
-    }, [user]);
-
-    function loginUser(userData) 
+  //the session lives in an httpOnly cookie, so ask the server who we are
+  const refreshUser = useCallback(async() =>
+  {
+    try
     {
-        setUser(userData);
+      const { user: me } = await getMe();
+      setUser(me);
+      return me;
     }
-
-    function logoutUser() 
+    catch
     {
-        setUser(null);
+      setUser(null);
+      return null;
     }
+  }, []);
 
-    return(
-        <AuthContext.Provider value={{ user, loginUser, logoutUser }}>
-            {children}
-        </AuthContext.Provider>
-    );
+  //check the cookie once when the site opens
+  useEffect(() =>
+  {
+    let cancelled = false;
+    getMe()
+      .then(({ user: me }) => { if(!cancelled) setUser(me); })
+      .catch(() => { if(!cancelled) setUser(null); })
+      .finally(() => { if(!cancelled) setReady(true); });
+    return() => { cancelled = true; };
+  }, []);
+
+  async function logoutUser()
+  {
+    try
+    {
+      await apiLogout();
+    }
+    finally
+    {
+      setUser(null);
+    }
+  }
+
+  return(
+    <AuthContext.Provider value={{ user, ready, loginUser: setUser, refreshUser, logoutUser }}>
+      {children}
+    </AuthContext.Provider>
+  );
 }
 
-export function useAuth() 
+// eslint-disable-next-line react-refresh/only-export-components
+export function useAuth()
 {
-    return useContext(AuthContext);
+  return useContext(AuthContext);
 }

@@ -7,19 +7,30 @@
 [data-theme="dark"] {
   --bg: #0F172A;
   --surface: #1E293B;
-  --border: #1E293B;
+  --surface-2: #263449;
+  --border: #334155;
   --text: #F8FAFC;
   --muted: #CBD5E1;
-  --pattern-opacity: 0.035;
+  --blue: #3B82F6;
+  --amber: #F59E0B;
+  --danger: #F87171;
+  --success: #34D399;
+  --overlay: rgba(2, 6, 23, 0.75);
+  --font-heading: "Poppins", sans-serif;
+  --font-body: "Inter", sans-serif;
+  --scroll-y: 0;
 }
 
 [data-theme="light"] {
   --bg: #F8FAFC;
   --surface: #FFFFFF;
+  --surface-2: #F1F5F9;
   --border: #E2E8F0;
   --text: #0F172A;
   --muted: #475569;
-  --pattern-opacity: 0.05;
+  --danger: #DC2626;
+  --success: #059669;
+  --overlay: rgba(15, 23, 42, 0.55);
 }
 
 /* ---------- BASE ---------- */
@@ -30,11 +41,10 @@ body,
 }
 
 body {
-  font-family: "Inter", sans-serif;
+  font-family: var(--font-body);
   background-color: var(--bg);
   color: var(--text);
-  /* Aperture pattern + grain, both layered on top of the base colour.
-     Simple SVG pattern, low opacity so it doesn't fight the content. */
+  /* aperture pattern + soft glow layered on the base colour */
   background-image:
     url("/aperture-pattern.svg"),
     radial-gradient(circle at 20% 10%, rgba(59,130,246,0.08), transparent 40%);
@@ -46,44 +56,80 @@ body {
 }
 
 h1, h2, h3, h4, h5 {
-  font-family: "Poppins", sans-serif;
+  font-family: var(--font-heading);
   font-weight: 600;
   letter-spacing: -0.01em;
+}
+
+:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
 }
 
 /* ---------- REUSABLE CLASSES ---------- */
 @layer components {
   .card {
     @apply bg-surface border border-border rounded-card p-4;
-    transition: box-shadow 0.25s ease, transform 0.25s ease;
   }
 
-  .card:hover {
-    box-shadow: 0 0 0 1px #3B82F6, 0 0 24px rgba(59,130,246,0.20);
+  /* only cards that are links lift on hover */
+  .card-hover {
+    transition: box-shadow 0.25s ease, transform 0.25s ease;
+  }
+  .card-hover:hover {
+    box-shadow: 0 0 0 1px var(--blue), 0 0 24px rgba(59,130,246,0.20);
     transform: translateY(-2px);
   }
 
-  .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl
-           font-semibold text-pixnavy bg-pixamber;
-    transition: filter 0.2s ease, transform 0.2s ease;
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-semibold;
+    transition: filter 0.2s ease, transform 0.2s ease, border-color 0.2s ease, color 0.2s ease, background-color 0.2s ease;
   }
-  .btn-primary:hover {
-    filter: brightness(1.08);
-    transform: translateY(-1px);
-  }
-  .btn-primary:disabled {
+  .btn:disabled {
     @apply opacity-50 cursor-not-allowed;
     transform: none;
   }
 
-  .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl
-           font-semibold text-ink border border-border;
+  .btn-primary {
+    @apply btn text-pixnavy bg-pixamber;
   }
-  .btn-secondary:hover {
-    border-color: #3B82F6;
-    color: #3B82F6;
+  .btn-primary:hover:not(:disabled) {
+    filter: brightness(1.08);
+    transform: translateY(-1px);
+  }
+
+  .btn-secondary {
+    @apply btn text-ink border border-border bg-transparent;
+  }
+  .btn-secondary:hover:not(:disabled) {
+    border-color: var(--blue);
+    color: var(--blue);
+  }
+
+  .btn-danger {
+    @apply btn border text-danger;
+    border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+  }
+  .btn-danger:hover:not(:disabled) {
+    border-color: var(--danger);
+    background-color: color-mix(in srgb, var(--danger) 10%, transparent);
+  }
+
+  .btn-sm {
+    @apply px-3 py-1.5 text-sm rounded-lg;
+  }
+
+  .icon-btn {
+    @apply inline-flex items-center justify-center w-9 h-9 rounded-lg text-muted;
+    transition: color 0.2s ease, background-color 0.2s ease;
+  }
+  .icon-btn:hover {
+    color: var(--blue);
+    background-color: rgba(59,130,246,0.10);
+  }
+
+  .label {
+    @apply block text-sm text-muted mb-1;
   }
 
   .input {
@@ -92,8 +138,23 @@ h1, h2, h3, h4, h5 {
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
   }
   .input:focus {
-    border-color: #3B82F6;
+    border-color: var(--blue);
     box-shadow: 0 0 0 3px rgba(59,130,246,0.20);
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium border border-border text-muted;
+    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+  }
+  .chip:hover {
+    color: var(--text);
+    border-color: var(--blue);
+  }
+  .chip-active {
+    @apply bg-pixblue text-white border-pixblue;
+  }
+  .chip-active:hover {
+    color: #fff;
   }
 
   .hashtag-pill {
@@ -108,4 +169,97 @@ h1, h2, h3, h4, h5 {
   .hashtag-text {
     @apply text-pixblue font-medium cursor-pointer hover:underline;
   }
+
+  .link {
+    @apply text-pixblue font-medium hover:underline;
+  }
+
+  .error-box {
+    @apply text-sm rounded-lg px-3 py-2 border text-danger;
+    background-color: color-mix(in srgb, var(--danger) 10%, transparent);
+    border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+  }
+
+  .notice-box {
+    @apply text-sm rounded-lg px-3 py-2 border border-pixamber/30 bg-pixamber/10 text-ink;
+  }
+
+  .tab {
+    @apply px-4 py-2 text-sm font-medium text-muted border-b-2 border-transparent whitespace-nowrap;
+    transition: color 0.2s ease, border-color 0.2s ease;
+  }
+  .tab:hover {
+    color: var(--text);
+  }
+  .tab-active {
+    @apply text-pixblue border-pixblue;
+  }
+  .tab-active:hover {
+    color: var(--blue);
+  }
+
+  .skeleton {
+    @apply rounded-card bg-surface border border-border;
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+/* ---------- LANDING PAGE ---------- */
+
+/* photos in the hero move at different speeds while scrolling */
+.parallax {
+  transform: translate3d(0, calc(var(--scroll-y) * var(--speed, 0.2) * -1px), 0) rotate(var(--tilt, 0deg));
+  will-change: transform;
+}
+
+/* sections fade in once they come into view */
+.reveal {
+  opacity: 0;
+  transform: translateY(32px);
+  transition: opacity 0.8s ease, transform 0.8s ease;
+}
+.reveal.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+/* the film strip slides sideways as you scroll down */
+.film-strip {
+  transform: translate3d(calc(var(--strip-progress, 0) * -30%), 0, 0);
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .parallax,
+  .film-strip {
+    transform: none;
+  }
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* how fast each hero photo drifts, and its tilt */
+.speed-1 { --speed: 0.06; }
+.speed-2 { --speed: 0.16; }
+.speed-3 { --speed: 0.28; }
+.speed-4 { --speed: 0.4; }
+.tilt-left { --tilt: -7deg; }
+.tilt-right { --tilt: 6deg; }
+.tilt-soft { --tilt: -2deg; }
+.tilt-slight { --tilt: 3deg; }
+
+/* white frame around landing photos, like a printed photo */
+.print {
+  @apply bg-white p-2 pb-8 rounded-sm shadow-2xl;
+}
+.print img {
+  @apply w-full h-full object-cover rounded-[2px];
 }

@@ -9,13 +9,16 @@ export default {
         border:  "var(--border)",
         muted:   "var(--muted)",
         ink:     "var(--text)",
+        surface2: "var(--surface-2)",
+        danger:  "var(--danger)",
+        success: "var(--success)",
         pixblue:  "#3B82F6",
         pixamber: "#F59E0B",
         pixnavy:  "#0F172A",
       },
       fontFamily: {
-        heading: ["Poppins", "sans-serif"],
-        body:    ["Inter", "sans-serif"],
+        heading: ["var(--font-heading)"],
+        body:    ["var(--font-body)"],
       },
       borderRadius: {
         card: "16px",

@@ -2,241 +2,201 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
-import {
-  getPost,
-  getUser,
-  deletePost,
-  getAlbumsForPost,
-  buildImageUrl,
-} from "../api.js";
+import { useUi } from "../context/UiContext.jsx";
+import { getPost, deletePost } from "../api.js";
 import Avatar from "../components/Avatar.jsx";
+import UserName from "../components/UserName.jsx";
+import HashtagList from "../components/HashtagList.jsx";
 import Comments from "../components/Comments.jsx";
-import EditPostForm from "../components/EditPostForm.jsx";
+import Modal from "../components/Modal.jsx";
+import PostForm from "../components/PostForm.jsx";
 import ReportModal from "../components/ReportModal.jsx";
+import SaveToAlbumModal from "../components/SaveToAlbumModal.jsx";
+import { HiddenNotice } from "../components/PostCard.jsx";
+import { fullDate, plural } from "../utils/format.js";
 
 export default function PostPage()
 {
   const { id } = useParams();
   const { user: me } = useAuth();
+  const { toast, confirm } = useUi();
   const navigate = useNavigate();
 
   const [post, setPost] = useState(null);
-  const [author, setAuthor] = useState(null);
-  const [albums, setAlbums] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-
-  const [editing, setEditing] = useState(false);
-  const [reporting, setReporting] = useState(false);
-
-  async function loadPost()
-  {
-    setLoading(true);
-    setError("");
-
-    try
-    {
-      const p = await getPost(id);
-      const a = await getUser(p.userId);
-      const albumsContaining = await getAlbumsForPost(id);
-
-      setPost(p);
-      setAuthor(a);
-      setAlbums(albumsContaining);
-    }
-    catch(err)
-    {
-      setError(err.message);
-    }
-    finally
-    {
-      setLoading(false);
-    }
-  }
+  const [modal, setModal] = useState(null); // "edit" | "report" | "save"
+  const [revealed, setRevealed] = useState(false);
+  const [reload, setReload] = useState(0);
 
   useEffect(() =>
   {
-    loadPost();
-  }, [id]);
+    let cancelled = false;
+    getPost(id)
+      .then((p) => { if(!cancelled) { setPost(p); setError(""); } })
+      .catch((err) => { if(!cancelled) setError(err.message); });
+    return() => { cancelled = true; };
+  }, [id, reload]);
 
   async function handleDelete()
   {
-    if(!window.confirm("Delete this post? This cannot be undone.")) return;
+    const byAdmin = post.canManage && !post.isOwner;
+    const ok = await confirm({
+      title: "Delete this post?",
+      message: byAdmin
+        ? "You're deleting someone else's post as a moderator. They will get a notification. Comments are deleted too."
+        : "The photo and all its comments will be deleted. If it's the only photo in an album, that album is removed too.",
+      confirmLabel: "Delete post",
+      danger: true,
+    });
+    if(!ok) return;
 
     try
     {
-      await deletePost(post._id);
-      navigate("/home");
+      const { albumsRemoved } = await deletePost(post._id, byAdmin ? "It broke the community rules" : undefined);
+      toast(albumsRemoved ? `Post deleted, along with ${plural(albumsRemoved, "empty album")}` : "Post deleted");
+      navigate(byAdmin ? "/admin" : `/profile/${me._id}`);
     }
     catch(err)
     {
-      setError(err.message);
+      toast(err.message, "error");
     }
   }
 
-  // ----- render states -----
+  if(error)
+  {
+    return(
+      <div className="card text-center py-12 max-w-lg mx-auto space-y-3">
+        <p className="text-ink font-medium">{error}</p>
+        <Link to="/home" className="btn-secondary btn-sm">Back to the feed</Link>
+      </div>
+    );
+  }
 
-  if(loading) return <p className="text-muted text-center py-10">Loading post…</p>;
-  if(error) return(
-    <p className="text-red-400 text-sm bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 max-w-xl mx-auto">
-      {error}
-    </p>
-  );
-  if(!post) return <p className="text-muted text-center py-10">Post not found.</p>;
+  if(!post || post._id !== id) return <div className="skeleton h-96" aria-label="Loading post" />;
 
-  const isOwner = me._id === post.userId.toString();
-  const reportCount = (post.reports || []).length;
-  const hidden = reportCount > 2;
-  // each user can only report a post once
-  const alreadyReported = (post.reports || []).some((r) => r.userId.toString() === me._id);
-
-  const imageSrc = post.imageUrl || buildImageUrl(post.image);
+  if(post.hidden && !revealed && !post.canManage)
+  {
+    return(
+      <div className="max-w-lg mx-auto space-y-3">
+        <HiddenNotice count={post.reportCount} onShow={() => setRevealed(true)} />
+      </div>
+    );
+  }
 
   return(
     <div className="space-y-4">
-      {/* back + actions row */}
-      <div className="flex items-center justify-between gap-2">
-        <Link to="/home" className="text-pixblue text-sm font-medium hover:underline">
-          ← Back to feed
-        </Link>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <button type="button" onClick={() => navigate(-1)} className="link text-sm">← Back</button>
 
         <div className="flex gap-2 flex-wrap">
-          {isOwner &&(
+          <button type="button" onClick={() => setModal("save")} className="btn-secondary btn-sm">Save to album</button>
+
+          {post.canManage &&(
             <>
-              <button onClick={() => setEditing((v) => !v)} className="btn-secondary text-sm">
-                {editing ? "Cancel edit" : "Edit"}
-              </button>
-              <button
-                onClick={handleDelete}
-                className="btn-secondary text-sm text-red-400 border-red-500/30 hover:border-red-500"
-              >
-                Delete
-              </button>
+              <button type="button" onClick={() => setModal("edit")} className="btn-secondary btn-sm">Edit</button>
+              <button type="button" onClick={handleDelete} className="btn-danger btn-sm">Delete</button>
             </>
           )}
 
-          {!isOwner && !alreadyReported &&(
-            <button onClick={() => setReporting(true)} className="btn-secondary text-sm">
-              Report
-            </button>
-          )}
-
-          {!isOwner && alreadyReported &&(
-            <button disabled className="btn-secondary text-sm opacity-50 cursor-not-allowed">
-              Reported
-            </button>
+          {!post.isOwner &&(
+            post.hasReported
+              ? <button type="button" disabled className="btn-secondary btn-sm">Reported</button>
+              : <button type="button" onClick={() => setModal("report")} className="btn-secondary btn-sm">Report</button>
           )}
         </div>
       </div>
 
-      {/* hidden warning (only visible to owner/admin here) */}
-      {hidden &&(
-        <p className="text-amber-300 text-sm bg-pixamber/10 border border-pixamber/30 rounded-lg px-3 py-2">
-          This post has been reported {reportCount} times.
+      {post.hidden &&(
+        <p className="notice-box">
+          This post was reported {plural(post.reportCount, "time")}, so it's hidden in the feed until a moderator reviews it.
         </p>
       )}
+      {post.canManage && !post.isOwner && (
+        <p className="text-xs text-muted">You're seeing moderator options because you're an admin.</p>
+      )}
 
-      {/* two-column layout */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-        {/* image column */}
         <div className="lg:col-span-3">
           <div className="card p-0 overflow-hidden">
-            {imageSrc ?(
-              <img
-                src={imageSrc}
-                alt={post.caption?.slice(0, 60) || "Post image"}
-                className="w-full h-auto max-h-[70vh] object-contain bg-bg"
-              />
-            ) :(
-              <div className="aspect-video bg-bg flex items-center justify-center text-muted">
-                No image
-              </div>
-            )}
+            <img
+              src={post.imageUrl}
+              alt={post.caption.slice(0, 80)}
+              className="w-full h-auto max-h-[75vh] object-contain bg-bg"
+            />
           </div>
         </div>
 
-        {/* details column */}
-        <div className="lg:col-span-2 space-y-4">
-          {/* author header */}
-          <div className="card">
-            <div className="flex items-center gap-3">
-              <Link to={`/profile/${post.userId}`}>
-                <Avatar name={author?.username} avatarUrl={author?.avatar} size={40} />
+        <div className="lg:col-span-2 space-y-4 min-w-0">
+          <article className="card space-y-3">
+            <header className="flex items-center gap-3">
+              <Link to={`/profile/${post.author?._id}`} aria-label={`${post.author?.username}'s profile`}>
+                <Avatar user={post.author} size="md" />
               </Link>
               <div className="flex-1 min-w-0">
-                <Link
-                  to={`/profile/${post.userId}`}
-                  className="font-medium text-ink hover:text-pixblue"
-                >
-                  {author?.username || "Unknown user"}
-                </Link>
-                <p className="text-xs text-muted">
-                  {new Date(post.createdAt).toLocaleString()}
-                </p>
+                <UserName user={post.author} />
+                <p className="text-xs text-muted"><time dateTime={post.createdAt}>{fullDate(post.createdAt)}</time></p>
               </div>
-            </div>
+            </header>
 
-            {/* caption */}
-            <p className="text-ink text-sm whitespace-pre-wrap mt-3">
-              {post.caption}
-            </p>
+            <p className="text-ink text-sm whitespace-pre-wrap break-words">{post.caption}</p>
+            <HashtagList tags={post.hashtags} pills />
 
-            {/* hashtags */}
-            {post.hashtags?.length > 0 &&(
-              <div className="mt-2 flex flex-wrap gap-2 text-sm">
-                {post.hashtags.map((tag, i) =>(
-                  <Link
-                    key={i}
-                    to={`/home?q=%23${encodeURIComponent(tag.startsWith("#") ? tag.slice(1) : tag)}`}
-                    className="hashtag-text"
-                  >
-                    {tag.startsWith("#") ? tag : `#${tag}`}
-                  </Link>
-                ))}
-              </div>
-            )}
-
-            {/* albums containing this post */}
-            {albums.length > 0 &&(
-              <div className="mt-3 pt-3 border-t border-border">
-                <p className="text-xs text-muted mb-1">In album{albums.length > 1 ? "s" : ""}:</p>
+            {post.albums.length > 0 &&(
+              <div className="pt-3 border-t border-border">
+                <p className="text-xs text-muted mb-1.5">In {post.albums.length > 1 ? "these albums" : "the album"}:</p>
                 <div className="flex flex-wrap gap-2">
-                  {albums.map((a) =>(
-                    <span key={a._id} className="hashtag-pill text-xs">
-                      {a.name}
-                    </span>
+                  {post.albums.map((a) =>(
+                    <Link key={a._id} to={`/album/${a._id}`} className="chip py-1 text-xs">▦ {a.name}</Link>
                   ))}
                 </div>
               </div>
             )}
-          </div>
+          </article>
 
-          {/* edit form */}
-          {editing &&(
-            <EditPostForm
-              post={post}
-              onSaved={async () =>
-              {
-                setEditing(false);
-                await loadPost();
-              }}
-              onCancel={() => setEditing(false)}
-            />
-          )}
-
-          {/* comments */}
           <div className="card">
-            <Comments post={post} onUpdated={loadPost} />
+            <Comments post={post} onChange={(updated) => setPost((p) => ({ ...p, ...updated }))} />
           </div>
         </div>
       </div>
 
-      {/* report modal */}
-      {reporting &&(
+      {modal === "edit" &&(
+        <Modal title="Edit post" onClose={() => setModal(null)}>
+          <PostForm
+            post={post}
+            onCancel={() => setModal(null)}
+            onDone={(saved) =>
+            {
+              setPost((p) => ({ ...p, ...saved }));
+              setModal(null);
+              toast("Post updated");
+            }}
+          />
+        </Modal>
+      )}
+
+      {modal === "report" &&(
         <ReportModal
           post={post}
-          onClose={() => setReporting(false)}
-          onReported={loadPost}
+          onClose={() => setModal(null)}
+          onReported={() =>
+          {
+            setModal(null);
+            setReload((n) => n + 1);
+            toast("Thanks. A moderator will take a look.");
+          }}
+        />
+      )}
+
+      {modal === "save" &&(
+        <SaveToAlbumModal
+          post={post}
+          onClose={() => setModal(null)}
+          onSaved={(message) =>
+          {
+            setModal(null);
+            setReload((n) => n + 1);
+            toast(message);
+          }}
         />
       )}
     </div>
