@@ -89,7 +89,12 @@ export default function Comments({ post, onChange })
                   {timeAgo(c.createdAt)}
                 </time>
                 {canDelete(c) &&(
-                  <button type="button" onClick={() => handleDelete(c)} className="text-xs text-muted hover:text-danger ml-auto">
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(c)}
+                    className="text-xs text-muted hover:text-danger ml-auto"
+                    aria-label={`Delete comment by ${c.author?.username || "deleted user"}`}
+                  >
                     Delete
                   </button>
                 )}
